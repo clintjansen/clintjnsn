@@ -1,14 +1,20 @@
 # JNSN — WebGL landing page
 
-A single-page art piece: the whole viewport is one fragment shader (three.js full-screen quad).
-The character and the spirit fox are **modelled**, not drawn over the reference: both are
-ray-marched signed-distance models living in the shader, lit and animated in 3D. The reference
-artwork only supplies the backdrop plates (flowing red magma, the fox's painted aura, the pale
-area). The UI layer: the frosted-glass panel with the mark and the Syne wordmark,
-and live mono readouts in the corners. The mark is one unbroken stroke reading J, N, S, N; the
-favicon is its J-hook (public/favicon.svg + PNG fallbacks).
+A single-page art piece in three layers, all seen through one orthographic camera:
 
-Vanilla JS, no framework. `npm run build` produces a static `dist/` folder that drops onto any host.
+1. **The backdrop**: a full-screen fragment shader. The red lava with its flowing contour lines,
+   the pale area, built from plates of the reference painting.
+2. **The avatar**: a real 3D model. A skinned mesh with three bones (chest, neck, head), built
+   from the reference painting itself so its rest pose has the painted outline. He breathes,
+   bobs, sways, and every few seconds turns his head towards the viewer.
+3. **His fire**: a real-time 3D fluid simulation on the GPU. The blue flame hair burns off his
+   scalp, rises and blows back, swirls, flows around his head as he moves, parts when the cursor
+   passes through it, and lights his skin. It is volume-rendered against the avatar's depth.
+
+The UI on top: the frosted-glass panel with the mark and the Syne wordmark, and live mono readouts
+in the corners. The mark is one unbroken stroke reading J, N, S, N; the favicon is its J-hook.
+
+Vanilla JS + three.js, no framework. `npm run build` produces a static `dist/` folder.
 
 ## Run
 
@@ -19,108 +25,118 @@ npm run build      # -> dist/
 npm run preview    # serve dist/ locally
 ```
 
-Quick experiments via URL parameters (no rebuild):
+URL parameters (no rebuild):
 
 | param | effect |
 | --- | --- |
 | `?fps=60` | render cap (default 24, `0` = uncapped) |
 | `?scale=0.75` | internal resolution factor (also adapts automatically when frames drop) |
 | `?skip` | skip the loader |
+| `?nofire` | the avatar without his fire |
+| `?firegrid=low` | a smaller fire grid (64×40×32) for weak GPUs |
+| `?fox` | show the fox spirit (parked while the avatar is being rebuilt) |
+
+The fire also has a standalone lab: `http://localhost:5173/tools/fire-lab.html`
+(`window.__fireLab`: `step(n)`, `capture(name)`, `setParam(k, v)`, `timings()`).
 
 ## How it is put together
 
 ```
-tools/reference.webp        the reference artwork (never drawn directly, not deployed)
-src/tex/                    backdrop plates generated from it by tools/prepare.py (imported, hashed)
-  base.webp                 colour plate with the character, his hair and the glass card inpainted away
-  detail.webp               same, unblurred (the fox's painted aura keeps its sharp edges)
-  mask.webp                 R reference silhouette, G fox aura, B magma; pale area = the rest
-  fields.webp               R figure field (contour lines wrap around it), B fox aura soft
-  extra.webp                B baked line texture (unused by the look, kept for experiments)
-  meta.json                 image size, glass-card rect
+tools/reference2.webp       the avatar reference (what the avatar and the fire are matched to)
+tools/reference.webp        the backdrop reference (plates for the lava and pale area)
+tools/build_avatar.py       builds the avatar mesh from reference2 (python, see below)
+tools/prepare.py            builds the backdrop plates from reference (python, see below)
 src/
   main.js                   boot + state machine (loading -> hold -> reveal -> live), behaviour, HUD
-  scene.js                  three.js renderer, cover mapping (viewport <-> artwork), uniforms
-  shaders/art.frag.glsl     THE ART: magma, plates, the bust and the fox (SDF ray marching), hair volume
-  noise.js                  tiling 4-channel noise texture the shader builds its fbm from
-  signals.js                the character's and the fox's "life": springs, sway, schedules
-  config.js                 all tunables (fps, loader timings, card size/position, art knobs)
-  ui.js / spring.js / logo.js / styles.css   loader, frosted panel, the meander mark, corner HUD, springs
-  input.js                  pointer -> image space, with a short trail the hair reacts to
+  scene.js                  renderer, the orthographic camera kept in lockstep with the cover
+                            mapping, draw order (backdrop, avatar, fire), the depth pass for the fire
+  config.js                 all tunables (fps, loader timings, card, fire box, fire look)
+  signals.js                life: glance spring, idle sway, breath, bob, wandering light
+  shaders/art.frag.glsl     the backdrop: lava, plates (and the parked fox)
+  avatar/
+    avatar.js               the skinned mesh, its rig, its skin material, and its description
+                            for the fire (head volumes and scalp in the current pose)
+    bust.vert.glsl / bust.frag.glsl   skinning + the painted skin
+    bust.bin / bust.json    the mesh (positions, normals, skin weights, indices) and its rig data
+    figure.webp             a soft field around the outline, so the lava lines wrap around him
+  fire/
+    fire.js                 the fluid simulation and its volume renderer (see the file header)
+    sampling.js             GLSL to read the fire's heat from any material (lights his skin)
+    shaders/*.glsl          the simulation and render passes
+    lab.js                  the fire lab (tools/fire-lab.html)
+  tex/                      backdrop plates (imported, so Vite hashes them)
+  noise.js                  tiling 4-channel noise texture, shared by the shaders
+  ui.js / spring.js / logo.js / styles.css   loader, frosted panel, mark, corner HUD
+  input.js                  pointer -> image space
   loop.js                   fps-locked rAF loop (24 by default), pauses when hidden
-tools/prepare.py            regenerates src/tex from the reference (python + pillow + numpy)
 ```
 
-### The shader, layer by layer
+World space everywhere: units are backdrop image heights, X right, Y up (0 = bottom of the
+image), Z towards the viewer. A reference2 pixel (x2, y2) sits at
+X = (x2 / 1.388 − 39) / 839, Y = 1 − (y2 / 1.388) / 839 (measured by registering the two
+paintings' lava).
 
-1. **Magma** — procedural everywhere: red with hot/cool drifts and a contour-line field whose
-   domain warp evolves in time (bounded, so it never shears) plus a slow uniform drift. During the
-   loader it is revealed by an organic, noisy disc growing from the screen centre.
-2. **Backdrop plates** — the fox's painted aura and the pale area, with faint static contour lines.
-3. **The bust** — a signed-distance model (cranium, face, nose, lips, chin, ear, eye socket, neck,
-   shoulders) ray-marched with an orthographic camera that matches the 2D composition. Shaded in
-   the art's navy with contour lines that follow the form in object space (so they turn with him),
-   a wandering key light, a cool fill from the fox, a hot rim and orange glints from the magma, and
-   a cheap ambient occlusion. He bobs, breathes (the chest rises), sways continuously and glances
-   toward the viewer: the glance is a critically damped spring, not a ramp, so starts and stops
-   are soft. Head yaw/pitch come from `signals.js` through `uHeadRig`.
-4. **Hair** — a volumetric flame on the crown: 11 depth slabs through a cone blown up and back,
-   with view-coherent noise so tongues survive the accumulation, a solid base, cyan cores and warm
-   fringes; it turns with the head and bends away from the pointer trail.
-5. **The fox** — a second SDF model sitting inside its aura (haunches, chest, legs, curling tail,
-   head with snout, nose and ears), rendered as a spirit: deep blue with light pouring through
-   the edges and a cyan rim, plus an aura glow hugging the silhouette. Its head is rigged
-   (`uFoxRig`: yaw, pitch, sniff, retreat): it watches the cursor on its own schedule and whenever
-   the cursor comes near, pulls back and flushes red when it gets too close, and sniffs the air
-   about a second after a close cursor has gone (or on an idle timer). Eye glints sharpen as it
-   watches.
-6. **Finish** — vignette and a whisper of grain.
+### The avatar
 
-All coordinates are "image uv" (0..1, y down) mapped onto the viewport with a `cover` fit and a
-focal point (`config.focal`) so portrait phones crop around the head. Model placement: `PIVOT`
-(bust) and `FOX_PIVOT` / `FOX_SCALE` (fox) in the shader; `FOX_FACE` in `main.js` is where the
-cursor distances are measured from.
+- **Shape** (`tools/build_avatar.py`): the painting is segmented into background and figure;
+  the face, chin, throat, neck and shoulders come straight from it, and the skull (hidden by the
+  fire in the painting) is an ellipse fitted to the face. That silhouette is inflated into 3D by
+  solving a Poisson equation inside it and taking the square root (a disc becomes a sphere, a band
+  a round tube, with no creases), then capped per region, meshed with marching cubes, smoothed and
+  decimated to ~46k triangles. Normals come from the volume itself.
+- **Rig**: chest → neck → head, at pivots measured on the painting. Skin weights blend across the
+  nape-to-throat line so a turn twists the whole neck. `avatar.setPose({ yaw, pitch, breath,
+  bobX, bobY })`.
+- **Skin**: near-black navy covered in short combed strokes in patches of different directions
+  (like the painting), a glossy ultramarine zone behind the neck with two hot streaks, a maroon
+  warmth at the cheek, an orange rim from the lava, blue light from his fire (sampled from the
+  simulation) with a yellow-to-cyan rim where it licks the forehead, and a cyan dissolve edge when
+  he teleports in. The strokes live in rest-pose space, so they stay on the skin as he moves.
 
-The loader counter starts with the first frame and is capped by the real texture downloads and the
-asynchronous shader compile, so it never claims more than has arrived; the magma disc eases
-towards it.
+### The fire
 
-### Tuning
+A 96×56×48 grid (`config.fireBox`) stored as a 2D texture atlas, stepped on the GPU every frame:
+advection, buoyancy, a wind that blows older flame back, a slow turbulence force, vorticity
+confinement, and a two-level pressure solve. The avatar's skull, face and neck are solid
+obstacles that move with the bones; the scalp (a shell around the skull, from the brow line to
+the nape) emits the fuel in noise-driven tongues. The volume is ray-marched at half resolution,
+stopped at the avatar's depth (fire in front of his face shows, fire behind his head does not),
+and composited over everything. The palette follows the painting: deep blue and ultramarine
+bodies, cyan and white cores, warm orange/pink fringes. Look and behaviour: `config.fireParams`
+(defaults and comments in `src/fire/fire.js`).
 
-- `src/config.js` — fps, loader timings, `cardScale` / `cardShiftY`, `art.*` knobs.
-- In the browser console: `__jnsn.scene.uniforms.<name>.value = …` changes live;
-  `__jnsn.live(12)` renders the finished scene at 12 s, `__jnsn.preview({ load: 0.4 })` renders
-  the loader at 40% (both stop the loop; `__jnsn.resume()` hands it back);
-  `__jnsn.scene.uniforms.uDebug.value = 1 | 2 | 3 | 4` shows the bust alone (flat light), the
-  masks, the lines only, or the hair density.
-- Shapes are plain SDF primitives in `sdBust` / `sdFox`: move a `vec3` centre or a radius and
-  reload. `uMarchSteps` / `uHairSteps` trade quality for speed.
+### The sequence
 
-### Regenerating the plates
+The loader counter is capped by the real downloads and the asynchronous shader compile, and the
+lava disc grows with it. At 100% the backdrop fades in with a ripple, the avatar teleports in
+through a noisy dissolve, and his fire ignites once he is mostly there.
 
-Only needed if the reference image or the classification rules change:
+### Tuning and debugging
+
+- `src/config.js`: fps, loader timings, `cardScale` / `cardShiftY`, `fireBox`, `fireParams`.
+- Console: `__jnsn.warm(200)` runs 200 live frames (fills the fire), `__jnsn.live(12)` renders the
+  finished scene at 12 s, `__jnsn.preview({ load: 0.4 })` the loader at 40% (these stop the loop;
+  `__jnsn.resume()` hands it back). `__jnsn.scene.fire.params.<name> = …` tunes the fire live,
+  `__jnsn.scene.avatar.uniforms.uDebug.value = 1` shows the bust's plain shape.
+
+### Regenerating the assets
 
 ```bash
-python -m pip install pillow numpy
-python tools/prepare.py
+python -m pip install pillow numpy scipy scikit-image fast-simplification
+python tools/build_avatar.py     # src/avatar/bust.bin, bust.json, figure.webp
+python tools/prepare.py          # src/tex/* (backdrop plates)
 ```
 
-It writes `src/tex/*` and visual checks to `tools/debug/` (ignored by git).
+Both write visual checks to `tools/debug/` (ignored by git).
 
 ## Browser support and performance
 
-- WebGL2 (every evergreen browser; three.js r169 no longer targets WebGL1).
-- `backdrop-filter` for the panel (Chrome 76+, Firefox 103+, Safari 9+ prefixed, 18+ unprefixed)
-  with a darker solid fallback.
-- Two ray marches and a volume per pixel are expensive: the device pixel ratio is capped at 1.0,
-  empty pixels skip the marches through 2D bounds, and the internal resolution steps down
-  automatically (and back up) when frames miss the 24 fps budget. Measured on an Intel UHD
-  integrated GPU: ~28 ms per 1230×641 frame; a 1080p screen settles around 0.7 scale.
-- The shader compiles asynchronously (about a second) while the loader counts.
-- Rendering pauses in background tabs. `prefers-reduced-motion` keeps the magma flowing at a crawl,
-  rests the character (no bob/glance/wave), dims the flames and lowers the cadence to 12 fps.
-
-## Future expansion
-
-The renderer is a self-contained module (`createScene`) with no DOM assumptions beyond the canvas,
-so a Preact/React shell can be added later for more pages without touching the art.
+- WebGL2 with half-float render targets (every evergreen browser).
+- `backdrop-filter` for the panel, with a solid fallback.
+- Measured on an Intel UHD integrated GPU at 1280×720: about 27 ms per frame (the fire's step
+  ~6 ms of GPU time, its march and composite ~2–4 ms, the backdrop and avatar the rest), inside
+  the 24 fps budget. The device pixel ratio is capped at 1.0 and the internal resolution steps
+  down automatically (and back up) when frames miss the budget; `?firegrid=low` halves the
+  simulation cost.
+- Rendering pauses in background tabs. `prefers-reduced-motion` keeps the lava flowing at a crawl,
+  rests the avatar, slows the fire and lowers the cadence to 12 fps.

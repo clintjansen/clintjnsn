@@ -14,6 +14,7 @@ import { createPointer } from './input.js';
 import { createLoop } from './loop.js';
 import { createSignals, easeInOutCubic, springTo, sway } from './signals.js';
 import { loadTextures, createScene, TEXTURE_COUNT } from './scene.js';
+import { loadAvatarBuffer } from './avatar/avatar.js';
 import meta from './tex/meta.json';
 
 const TAU = Math.PI * 2;
@@ -40,6 +41,8 @@ let signals = createSignals({ seed: 7 });
 let loop = null;
 let cardShown = false;
 let motion = 1;          // 0 under prefers-reduced-motion: no bob / glance / wave
+const pose = { yaw: 0, pitch: 0, breath: 0, bobX: 0, bobY: 0 };
+const firePointer = { x: -10, y: -10, vx: 0, vy: 0, active: false };
 
 // The fox: where its nose is (image uv), its head rig, mood, and glow pulse phase.
 const FOX_FACE = { u: 0.58, v: 0.10 };
@@ -112,6 +115,8 @@ function applyMotionPreference() {
   u.uFlowSpeed.value = config.art.flowSpeed * (reduce ? 0.15 : 1);
   u.uWarpSpeed.value = config.art.warpSpeed * (reduce ? 0.15 : 1);
   u.uFlameAmount.value = reduce ? Math.min(0.3, config.art.flameAmount) : config.art.flameAmount;
+  // the fire keeps burning, but slowly and calmly
+  if (scene.fire) scene.fire.params.timeScale = reduce ? 0.35 : 1;
 }
 
 // ---------------------------------------------------------------- adaptive resolution
@@ -148,12 +153,24 @@ async function boot() {
   reduceMotion.addEventListener('change', applyMotionPreference);
   loop.start();
 
-  const textures = await loadTextures(() => { filesDone++; });
-  scene = createScene({ canvas, textures, meta });
+  const [textures, avatarBuffer] = await Promise.all([
+    loadTextures(() => { filesDone++; }),
+    loadAvatarBuffer().then((b) => { filesDone++; return b; }),
+  ]);
+  scene = createScene({ canvas, textures, meta, avatarBuffer });
   applyMotionPreference();
-  // The shader is big; let the driver compile it without freezing the page (the counter keeps going).
+  // The fire (a 3D fluid simulation) lights the skin, so it is attached before compiling.
+  try {
+    if (await scene.attachFire()) {
+      console.info('[jnsn] fire attached');
+      applyMotionPreference();
+    }
+  } catch (err) {
+    console.warn('[jnsn] fire unavailable, continuing without it', err);
+  }
+  // Big shaders: let the driver compile without freezing the page (the counter keeps going).
   const compileMs = await scene.compile();
-  console.info(`[jnsn] shader compiled in ${compileMs} ms`);
+  console.info(`[jnsn] shaders compiled in ${compileMs} ms`);
 
   pointer = createPointer({
     toImageUV: (x, y) => scene.cover.screenToImage(x, y),
@@ -206,7 +223,7 @@ function frame(dt, elapsed, now) {
     // A time ramp that can never outrun the real downloads.
     const ramp = Math.min(1, stateT / config.loader.minDuration);
     const organic = ramp - 0.045 * Math.sin(ramp * TAU * 1.5) * (1 - ramp);  // breathes a little
-    const cap = assetsReady ? 1 : 0.08 + 0.8 * (filesDone / TEXTURE_COUNT);
+    const cap = assetsReady ? 1 : 0.08 + 0.8 * (filesDone / (TEXTURE_COUNT + 1));
     shown = Math.max(shown, Math.min(1, Math.min(organic, cap)));
     loader.set(shown);
     if (shown >= 1) enter(State.HOLD);
@@ -219,7 +236,7 @@ function frame(dt, elapsed, now) {
     }
   }
 
-  if (!scene) return; // DOM-only until the textures are in
+  if (!scene || !pointer) return; // DOM-only until the textures are in and the shaders are built
 
   const u = scene.uniforms;
   if (state <= State.HOLD) {
@@ -256,8 +273,22 @@ function frame(dt, elapsed, now) {
   u.uPointerVel.value.set(pointer.velocity.u * vk, pointer.velocity.v * vk);
   u.uPointerOn.value = pointer.current.active ? 1 : 0;
 
-  // ---- the character's head: glance spring + idle sway (radians), nothing under reduced motion
-  u.uHeadRig.value.set(signals.headYaw * motion, 0.14 + signals.headPitch * motion);   // 0.14: level the head
+  // ---- the avatar's rig: glance spring + idle sway, breathing, bob (nothing under reduced motion)
+  pose.yaw = signals.headYaw * 0.8 * motion;                 // > 0 turns his face to the viewer
+  pose.pitch = (signals.headPitch + signals.turn * 0.10) * motion;   // lifts the chin as he looks up
+  pose.breath = signals.breath * (0.4 + 0.6 * motion);
+  pose.bobX = signals.bob.x * aspect * motion;
+  pose.bobY = -signals.bob.y * motion;
+  // the hand moves the air around his fire (world units: X right, Y up)
+  firePointer.active = pointer.current.active;
+  firePointer.x = pointer.current.u * aspect;
+  firePointer.y = 1 - pointer.current.v;
+  firePointer.vx = pointer.velocity.u * vk * aspect;
+  firePointer.vy = -pointer.velocity.v * vk;
+  // the fire ignites once he has mostly materialised
+  const r = u.uReveal.value;
+  const ignite = Math.min(1, Math.max(0, (r - 0.45) / 0.55));
+  scene.update({ dt, pose, pointer: firePointer, intensity: ignite * ignite * (3 - 2 * ignite) });
 
   // ---- the fox: watches the hand on its own schedule and whenever it comes close
   const active = pointer.current.active;
@@ -333,6 +364,16 @@ function installDebugHook() {
     resume() {
       scene.setLoad(1);
       loop.start();
+    },
+    /** Run n frames of the live state at 24 fps without presenting (fills the fire). */
+    warm(n = 200, start = 10) {
+      loop.stop();
+      shown = 1;
+      disc = 1;
+      loader.hide();
+      enter(State.LIVE);
+      showCard();
+      for (let i = 0; i < n; i++) frame(1 / 24, start + i / 24, performance.now());
     },
   };
   if (import.meta.env.DEV) {

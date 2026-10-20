@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fire Lab</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d0d10; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #hud {
+      position: fixed; left: 10px; bottom: 8px; margin: 0;
+      font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #fff;
+      text-shadow: 0 0 3px #000, 0 0 2px #000; white-space: pre; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <pre id="hud"></pre>
+  <!--
+    Fire lab: the fluid fire (src/fire/fire.js) on a provisional head.
+    URL params: ?quality=low|high|ultra  &grid=96x56x48  &bg=ref|proc|black  &paused  &w=1230&h=641
+    Console: __fireLab.step(n), .render(), .capture(name), .setParam(k, v), .timings()
+  -->
+  <script type="module" src="/src/fire/lab.js"></script>
+</body>
+</html>

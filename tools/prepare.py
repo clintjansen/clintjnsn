@@ -271,6 +271,11 @@ def main():
     onehot_bg[..., P] = 0.0
     soft_bg = membrane_fill(onehot_bg, plate_known)
     labels_bg = soft_bg[..., 1:].argmax(-1) + 1          # B, M or Wt only: what is behind him
+    # The blue region of the painting is his fire, which is now a live 3D simulation: the plate
+    # behind it is lava (filled from the lava around it, never from the painted fire's colours).
+    painted_fire = labels_bg == B
+    plate_known &= ~painted_fire
+    labels_bg[painted_fire] = M
     onehot_bg = np.eye(4, dtype=np.float32)[labels_bg]
 
     # ---- 3. soft partition masks of the background; R keeps the reference silhouette --------
@@ -284,6 +289,8 @@ def main():
     detail_rgb = np.zeros_like(img)
     for k in (1, 2, 3):
         region = labels_bg == k
+        if not (plate_known & region).any():
+            continue          # an empty region would fill with NaN and poison the sum
         fill_k = membrane_fill(img, plate_known & region)
         detail_rgb += fill_k * region[..., None]
     detail_rgb = reflect_edges(detail_rgb, CARD, 120, 50)
@@ -325,7 +332,7 @@ def main():
     ys, xs = np.nonzero(onehot[..., 0] > 0.5)
     person_box = [float(xs.min() / W), float(ys.min() / H), float(xs.max() / W), float(ys.max() / H)]
     ys, xs = np.nonzero(onehot[..., 1] > 0.5)
-    blue_box = [float(xs.min() / W), float(ys.min() / H), float(xs.max() / W), float(ys.max() / H)]
+    blue_box = [float(xs.min() / W), float(ys.min() / H), float(xs.max() / W), float(ys.max() / H)] if len(xs) else None
     meta = {
         'width': W, 'height': H,
         'card': [x0 / W, y0 / H, x1 / W, y1 / H],
