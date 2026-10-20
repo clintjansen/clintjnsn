@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>JNSN</title>
+  <meta name="description" content="JNSN" />
+  <meta name="theme-color" content="#d8371d" />
+
+  <!-- Fonts are self-hosted (@fontsource, imported from main.js): nothing third-party blocks first paint. -->
+  <link rel="stylesheet" href="/src/styles.css" />
+
+  <!-- Without JS the loader would sit at 0% forever; show the plain wordmark instead. -->
+  <noscript><style>#loader { display: none; }</style></noscript>
+</head>
+<body>
+  <canvas id="gl" aria-hidden="true"></canvas>
+
+  <main id="ui">
+    <div id="card" class="card">
+      <span class="card__logo"></span>
+      <h1 class="card__word">JNSN</h1>
+    </div>
+    <noscript>JNSN</noscript>
+  </main>
+
+  <div id="loader">
+    <!-- the visual counter is decorative for assistive tech; one calm status line instead -->
+    <span class="sr-only" role="status" aria-live="polite" id="loader-status">Loading</span>
+    <div class="loader__num" aria-hidden="true"><span class="loader__digits">0</span><span class="loader__pct">%</span></div>
+    <div class="loader__rule" aria-hidden="true"><i></i></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

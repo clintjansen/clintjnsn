@@ -1,0 +1,251 @@
+/* ============================================================
+   JNSN — UI layer over the full-screen WebGL canvas
+   Layers: #gl (canvas) < #ui / .card (z 2) < #loader (z 3)
+   ============================================================ */
+
+/* ---------- reset ---------- */
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #d8371d;
+  color: #fff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  /* dvh tracks the collapsing mobile browser chrome; vh is the fallback */
+  height: 100vh;
+  height: 100dvh;
+  font-family: 'Syne', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* ---------- WebGL canvas ---------- */
+
+#gl {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* single-finger drags still reach the flames; two-finger zoom stays with the browser */
+  touch-action: pinch-zoom;
+}
+
+/* visually hidden, still read by assistive tech */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- UI layer ---------- */
+
+#ui {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  /* the canvas must keep receiving pointer events for the flame */
+  pointer-events: none;
+}
+
+#ui noscript {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 800 clamp(40px, 10vw, 160px) / 1 'Syne', system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ---------- frosted card ---------- */
+
+.card {
+  /* geometry, written by ui.js layout() as unitless px numbers */
+  --card-x: 0;
+  --card-y: 0;
+  --card-w: 320;
+  --card-h: 120;
+  /* entrance state, driven by springs in ui.js */
+  --card-opacity: 0;
+  --card-scale: 0.94;
+  --card-rise: 10;
+
+  position: fixed;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  width: calc(var(--card-w) * 1px);
+  height: calc(var(--card-h) * 1px);
+  padding: 0 calc(var(--card-h) * 0.1px);
+
+  transform-origin: center;
+  transform: translate3d(calc(var(--card-x) * 1px), calc(var(--card-y) * 1px), 0)
+    translateY(calc(var(--card-rise) * 1px))
+    scale(var(--card-scale));
+  opacity: var(--card-opacity);
+  visibility: hidden;
+  will-change: transform, opacity;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--card-h) * 0.11px);
+
+  color: #fff;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.17), rgba(255, 255, 255, 0.09));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 30px 80px -30px rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(26px) saturate(1.15);
+  backdrop-filter: blur(26px) saturate(1.15);
+}
+
+.card.is-visible {
+  visibility: visible;
+}
+
+/* hide(): a plain fade, no spring needed (duration mirrored in ui.js) */
+.card.is-leaving {
+  transition: opacity 0.25s ease-out;
+}
+
+/* no backdrop blur available: a milkier card still reads as glass */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .card {
+    background: rgba(255, 255, 255, 0.42);
+  }
+}
+
+/* everything inside scales from --card-h only, so 180px phones and 700px 4K both work */
+
+.card__logo {
+  flex: none;
+  display: block;
+  height: calc(var(--card-h) * 0.46px);
+  /* matches the SVG viewBox (120 x 150) so width resolves before the SVG lands */
+  aspect-ratio: 120 / 150;
+  width: auto;
+}
+
+.card__logo svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: #fff;
+}
+
+.card__word {
+  flex: none;
+  margin: 0;
+  /* letter-spacing adds a trailing gap after the last N; pull it back so the pair stays centred */
+  margin-right: -0.06em;
+  font-family: 'Syne', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 800;
+  /* scales with the card height, but never wider than the card on narrow phones */
+  font-size: min(calc(var(--card-h) * 0.36px), calc(var(--card-w) * 0.125px));
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.18);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ---------- loader: hard black and white on the red ---------- */
+
+#loader {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  pointer-events: none;
+  transition:
+    opacity 0.45s ease-out,
+    transform 0.45s ease-out;
+}
+
+#loader.is-done {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+#loader.is-hidden {
+  display: none;
+}
+
+.loader__num {
+  padding: 6px 14px;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 500;
+  font-size: clamp(44px, 7vw, 104px);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.loader__digits {
+  /* reserve "100" so the box does not jitter as digits are added */
+  display: inline-block;
+  min-width: 3ch;
+  text-align: right;
+}
+
+.loader__pct {
+  font-size: 0.42em;
+  vertical-align: top;
+  margin-left: 0.12em;
+}
+
+.loader__rule {
+  width: 168px;
+  height: 2px;
+  background: #000;
+}
+
+.loader__rule > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #fff;
+  transform-origin: left;
+  transition: width 0.12s linear;
+}
+
+/* ---------- reduced motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  #loader,
+  .loader__rule > i,
+  .card.is-leaving {
+    transition: none;
+  }
+
+  /* safety net next to the matchMedia check in ui.js: a visible card is at rest */
+  .card.is-visible {
+    --card-opacity: 1 !important;
+    --card-scale: 1 !important;
+    --card-rise: 0 !important;
+  }
+}
