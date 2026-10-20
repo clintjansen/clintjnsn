@@ -63,6 +63,13 @@ export function computeCover(vw, vh, iw, ih, focal) {
   };
 }
 
+/** The reference's card rect scaled about its centre: what the glass card actually covers. */
+export function scaledCardRect([x0, y0, x1, y1], k, shiftY = 0) {
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2 + shiftY;
+  const hw = (x1 - x0) / 2 * k, hh = (y1 - y0) / 2 * k;
+  return [cx - hw, cy - hh, cx + hw, cy + hh];
+}
+
 export function createScene({ canvas, textures, meta }) {
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -105,7 +112,7 @@ export function createScene({ canvas, textures, meta }) {
     uLightAngle: { value: 0 },
     uFlare: { value: 0.5 },
     uCrown: { value: new THREE.Vector2(meta.crown[0], meta.crown[1]) },
-    uCardRect: { value: new THREE.Vector4(meta.card[0], meta.card[1], meta.card[2], meta.card[3]) },
+    uCardRect: { value: new THREE.Vector4(...scaledCardRect(meta.card, config.cardScale, config.cardShiftY)) },
     uHairSplit: { value: meta.hairSplitX ?? 0.376 },
     uTrail: { value: trail },
     uPointer: { value: new THREE.Vector2(-10, -10) },
@@ -113,6 +120,8 @@ export function createScene({ canvas, textures, meta }) {
     uPointerOn: { value: 0 },
     uFoxLook: { value: new THREE.Vector4(0, 0, 0, 0) },   // gaze.xy (image uv dir), attention, upset
     uFoxPhase: { value: 0 },                               // glow pulse phase (quickens when upset)
+    uHeadRig: { value: new THREE.Vector2(0, 0) },          // bust head yaw, pitch
+    uFoxRig: { value: new THREE.Vector4(0, 0, 0, 0) },     // fox head yaw, pitch, sniff, retreat
 
     uFlowSpeed: { value: config.art.flowSpeed },
     uWarpSpeed: { value: config.art.warpSpeed },
@@ -121,6 +130,8 @@ export function createScene({ canvas, textures, meta }) {
     uFlameAmount: { value: config.art.flameAmount },
     uGrain: { value: config.art.grain },
     uDebug: { value: 0 },
+    uMarchSteps: { value: 36 },
+    uHairSteps: { value: 11 },
   };
 
   const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader, depthTest: false, depthWrite: false });
@@ -186,6 +197,14 @@ export function createScene({ canvas, textures, meta }) {
     uniforms.uSpread.value = eased * (maxSpread + 0.08) / 0.85;
   }
 
+  /** Compile the program off the main thread where the driver allows it (KHR_parallel_shader_compile). */
+  async function compile() {
+    const t0 = performance.now();
+    if (renderer.compileAsync) await renderer.compileAsync(scene, camera);
+    else renderer.compile(scene, camera);
+    return Math.round(performance.now() - t0);
+  }
+
   function render(time) {
     lastTime = time;
     rendered = true;
@@ -202,7 +221,7 @@ export function createScene({ canvas, textures, meta }) {
   }
 
   return {
-    renderer, uniforms, resize, render, setLoad, setRenderScale, dispose,
+    renderer, uniforms, resize, render, setLoad, setRenderScale, dispose, compile,
     get cover() { return cover; },
     get renderScale() { return renderScale; },
   };

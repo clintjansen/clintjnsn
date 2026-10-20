@@ -9,10 +9,10 @@
 import '@fontsource/syne/800.css';
 import '@fontsource/jetbrains-mono/500.css';
 import { config } from './config.js';
-import { createLoader, createCard } from './ui.js';
+import { createLoader, createCard, createHud } from './ui.js';
 import { createPointer } from './input.js';
 import { createLoop } from './loop.js';
-import { createSignals, easeInOutCubic } from './signals.js';
+import { createSignals, easeInOutCubic, springTo, sway } from './signals.js';
 import { loadTextures, createScene, TEXTURE_COUNT } from './scene.js';
 import meta from './tex/meta.json';
 
@@ -20,6 +20,9 @@ const TAU = Math.PI * 2;
 const canvas = document.getElementById('gl');
 const loader = createLoader();
 const card = createCard();
+const hud = createHud();
+const PHASES = ['LOADING', 'HOLD', 'REVEAL', 'LIVE'];
+let fpsEma = 0;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 // ---------------------------------------------------------------- state machine
@@ -38,14 +41,20 @@ let loop = null;
 let cardShown = false;
 let motion = 1;          // 0 under prefers-reduced-motion: no bob / glance / wave
 
-// The fox: where its face is (image uv), how upset it is, and its glow pulse phase.
-const FOX_FACE = { u: 0.64, v: 0.15 };
+// The fox: where its nose is (image uv), its head rig, mood, and glow pulse phase.
+const FOX_FACE = { u: 0.58, v: 0.10 };
+const foxYaw = { x: 0, v: 0 };
+const foxPitch = { x: 0, v: 0 };
 let foxUpset = 0;
 let foxPhase = 0;
+let foxSniffT = 99;      // seconds since the current sniff started
+let foxWasNear = false;  // the cursor was in its face recently
+let foxGoneT = 0;        // how long ago it left
 
 function enter(next) {
   state = next;
   stateT = 0;
+  hud.setPhase(PHASES[next]);
 }
 
 // ---------------------------------------------------------------- layout
@@ -59,22 +68,24 @@ function layoutCard() {
   if (!scene) return;
   const { w: vw, h: vh } = viewportSize();
   const [cx0, cy0, cx1, cy1] = meta.card;
-  const [x0, y0] = scene.cover.imageToScreen(cx0, cy0);
-  const [x1, y1] = scene.cover.imageToScreen(cx1, cy1);
-  const mappedW = x1 - x0;
-  const mappedH = y1 - y0;
+  const [x0, y0] = scene.cover.imageToScreen(cx0, cy0 + config.cardShiftY);
+  const [x1, y1] = scene.cover.imageToScreen(cx1, cy1 + config.cardShiftY);
+  // The reference's frosted rect, scaled about its centre (config.cardScale).
+  const k = config.cardScale;
+  const mappedW = (x1 - x0) * k;
+  const mappedH = (y1 - y0) * k;
   const gutter = vw * 0.04;
   const maxW = vw - gutter * 2;
   let w = mappedW;
   let h = mappedH;
-  let x = x0;
+  let x = x0 + ((x1 - x0) - mappedW) / 2;
   if (mappedW > maxW) {
     // Narrow viewport: shrink the width hard and the height gently so the eyes stay covered.
     w = maxW;
     h = mappedH * Math.sqrt(w / mappedW);
     x = (vw - w) / 2;
   }
-  let y = y0 + (mappedH - h) / 2;
+  let y = y0 + ((y1 - y0) - h) / 2;
   // The focal crop can push the mapped rect past an edge on in-between aspect ratios.
   x = Math.min(Math.max(x, gutter), vw - w - gutter);
   y = Math.min(Math.max(y, 0), Math.max(0, vh - h));
@@ -140,6 +151,9 @@ async function boot() {
   const textures = await loadTextures(() => { filesDone++; });
   scene = createScene({ canvas, textures, meta });
   applyMotionPreference();
+  // The shader is big; let the driver compile it without freezing the page (the counter keeps going).
+  const compileMs = await scene.compile();
+  console.info(`[jnsn] shader compiled in ${compileMs} ms`);
 
   pointer = createPointer({
     toImageUV: (x, y) => scene.cover.screenToImage(x, y),
@@ -242,20 +256,43 @@ function frame(dt, elapsed, now) {
   u.uPointerVel.value.set(pointer.velocity.u * vk, pointer.velocity.v * vk);
   u.uPointerOn.value = pointer.current.active ? 1 : 0;
 
-  // The fox sneakily watches the hand: on its own schedule, and always when it comes close.
+  // ---- the character's head: glance spring + idle sway (radians), nothing under reduced motion
+  u.uHeadRig.value.set(signals.headYaw * motion, 0.14 + signals.headPitch * motion);   // 0.14: level the head
+
+  // ---- the fox: watches the hand on its own schedule and whenever it comes close
+  const active = pointer.current.active;
   const fdx = (pointer.current.u - FOX_FACE.u) * aspect;
   const fdy = pointer.current.v - FOX_FACE.v;
   const fd = Math.hypot(fdx, fdy);
-  const near = pointer.current.active ? Math.exp(-(fd * fd) / (0.24 * 0.24)) : 0;
-  const attention = Math.max(signals.foxAttention, Math.min(1, near * 1.6)) * (pointer.current.active ? 1 : 0);
-  // upset rises quickly when the hand is close and calms down slowly
+  const near = active ? Math.exp(-(fd * fd) / (0.26 * 0.26)) : 0;
+  const attention = Math.max(signals.foxAttention, Math.min(1, near * 1.6)) * (active ? 1 : 0);
+  // upset rises quickly when the hand is in its face and calms down slowly
   const upsetTarget = Math.min(1, near * 1.2);
   foxUpset += (upsetTarget - foxUpset) * Math.min(1, dt * (upsetTarget > foxUpset ? 5 : 1.2));
+  // sniff: on an idle timer, and ~1 s after a hand that was close has gone away (or left the page)
+  if (near > 0.45) { foxWasNear = true; foxGoneT = 0; }
+  else if (foxWasNear) { foxGoneT += dt; if (foxGoneT > 0.9) { foxWasNear = false; foxSniffT = 0; } }
+  if (signals.foxSniffTick) foxSniffT = 0;
+  foxSniffT += dt;
+  const sniff = foxSniffT < 1.6 ? Math.sin(Math.PI * foxSniffT / 1.6) : 0;
+  // head aim: the fox faces left; a hand to the right turns the head back (capped), below dips the nose
+  const yawTarget = Math.max(-0.8, Math.min(0.8, fdx * 1.5)) * attention;
+  const pitchTarget = Math.max(-0.45, Math.min(0.45, fdy * 1.3)) * attention - 0.28 * sniff + 0.18 * foxUpset;
+  const idleYaw = 0.07 * sway(elapsed + 5.0, 0.27, 0.49, 0.9) * motion;
+  const idlePitch = 0.04 * sway(elapsed + 9.0, 0.23, 0.53, 0.97) * motion;
+  springTo(foxYaw, yawTarget + idleYaw, attention > 0.5 ? 4.0 : 2.2, dt);
+  springTo(foxPitch, pitchTarget + idlePitch, 3.4, dt);
+  u.uFoxRig.value.set(foxYaw.x, foxPitch.x, sniff, foxUpset);
   const gx = fd > 1e-4 ? fdx / fd : 0;
   const gy = fd > 1e-4 ? fdy / fd : 0;
   u.uFoxLook.value.set(gx, gy, attention, foxUpset);
   foxPhase += dt * (0.55 + 2.6 * foxUpset);
   u.uFoxPhase.value = foxPhase % TAU;
+
+  // ---- readouts
+  hud.setPointer(active ? pointer.current.u : NaN, active ? pointer.current.v : NaN);
+  if (dt > 0) fpsEma += (1 / dt - fpsEma) * 0.08;
+  hud.setStats(Math.min(Math.round(fpsEma), config.fps > 0 ? config.fps : 999), window.innerWidth, window.innerHeight);
   // uTrail shares the pointer's Float32Array; three re-uploads it every frame.
   if (u.uTrail.value !== pointer.trail) u.uTrail.value = pointer.trail;
 
@@ -291,7 +328,7 @@ function installDebugHook() {
       signals = fresh;
       if (pointerUV) { pointer.current.u = pointerUV[0]; pointer.current.v = pointerUV[1]; pointer.current.active = true; }
       frame(1 / 24, time, performance.now());
-      if (turn !== undefined) { scene.uniforms.uTurn.value = turn; scene.render(time); }
+      if (turn !== undefined) { scene.uniforms.uTurn.value = turn; scene.uniforms.uHeadRig.value.set(turn * 0.62, turn * 0.05); scene.render(time); }
     },
     resume() {
       scene.setLoad(1);

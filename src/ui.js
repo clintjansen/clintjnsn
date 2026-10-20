@@ -1,6 +1,6 @@
 /**
- * ui.js — the two DOM pieces over the WebGL canvas:
- * the black-and-white loader and the frosted "JNSN" card.
+ * ui.js — the DOM pieces over the WebGL canvas:
+ * the loader box, the "JNSN" stamp card and the four corner HUD readouts.
  *
  * Nothing here touches the DOM at import time; main.js calls the factories.
  */
@@ -14,7 +14,22 @@ const reducedMotion = () =>
 const clamp01 = (n) => (n > 1 ? 1 : n > 0 ? n : 0); // NaN falls through to 0
 const halfPx = (n) => (Number.isFinite(n) ? Math.round(n * 2) / 2 : 0); // crisp text on a 0.5px grid
 
+/**
+ * A textContent writer that remembers the last string it wrote and skips repeats.
+ * The HUD setters and the loader run every frame; the DOM must only change when the text does.
+ */
+function textSink(el) {
+  let last = null;
+  return (text) => {
+    if (text === last) return;
+    last = text;
+    if (el) el.textContent = text;
+  };
+}
+
 /* ---------- loader ---------- */
+
+const LOADER_FADE_MS = 360; // just past #loader's 0.35s opacity transition
 
 export function createLoader() {
   const root = document.getElementById('loader');
@@ -41,7 +56,7 @@ export function createLoader() {
       setTimeout(() => {
         root.classList.add('is-hidden');
         resolve();
-      }, reducedMotion() ? 0 : 480);
+      }, reducedMotion() ? 0 : LOADER_FADE_MS);
     });
     return hiding;
   }
@@ -99,19 +114,19 @@ export function createCard() {
       return;
     }
 
-    // Opacity is slightly over-damped-ish (no visible flash past 1); scale and
-    // rise share a softer spring so the card lands with a hint of overshoot.
+    // Snappy: opacity is close to critically damped (no flash past 1); scale and
+    // rise share a slightly livelier spring so the card lands with a hint of overshoot.
     springs = [
       spring({
-        from: 0, to: 1, stiffness: 120, damping: 20,
+        from: 0, to: 1, stiffness: 220, damping: 24,
         onUpdate: (v) => setVar('--card-opacity', clamp01(v)),
       }),
       spring({
-        from: 0.94, to: 1, stiffness: 150, damping: 18,
+        from: 0.97, to: 1, stiffness: 240, damping: 22,
         onUpdate: (v) => setVar('--card-scale', v),
       }),
       spring({
-        from: 10, to: 0, stiffness: 150, damping: 18,
+        from: 6, to: 0, stiffness: 240, damping: 22,
         onUpdate: (v) => setVar('--card-rise', v),
       }),
     ];
@@ -136,4 +151,38 @@ export function createCard() {
   }
 
   return { el, layout, show, hide };
+}
+
+/* ---------- hud ---------- */
+
+const NO_READING = '\u2014'; // em dash: the pointer is off the canvas / not finite
+
+const coord = (n) => (Number.isFinite(n) ? clamp01(n).toFixed(3) : NO_READING);
+const whole = (n) => (Number.isFinite(n) ? String(Math.round(n)) : '0');
+
+/**
+ * The four corner readouts. Only three are live: #hud-xy, #hud-stats and #hud-phase
+ * (the top-left "JNSN" is static). Every setter is safe to call per frame.
+ */
+export function createHud() {
+  const writeXY = textSink(document.getElementById('hud-xy'));
+  const writeStats = textSink(document.getElementById('hud-stats'));
+  const writePhase = textSink(document.getElementById('hud-phase'));
+
+  /** Pointer in image uv, 0..1: "X 0.512 / Y 0.233"; a non-finite axis prints as an em dash. */
+  function setPointer(u, v) {
+    writeXY('X ' + coord(u) + ' / Y ' + coord(v));
+  }
+
+  /** "24 FPS / 1920 x 1080": frame rate and the canvas size in CSS px (all rounded). */
+  function setStats(fps, w, h) {
+    writeStats(whole(fps) + ' FPS / ' + whole(w) + ' x ' + whole(h));
+  }
+
+  /** The state label, always upper-case: LOADING, HOLD, REVEAL, LIVE, ... */
+  function setPhase(text) {
+    writePhase(String(text ?? '').toUpperCase());
+  }
+
+  return { setPointer, setStats, setPhase };
 }

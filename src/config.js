@@ -17,12 +17,14 @@ export const config = {
   // Rendering ----------------------------------------------------------------
   fps: num('fps', 24),             // locked cadence; the art is composed for 24 but any rate works
   renderScale: num('scale', 1),    // multiplied by min(devicePixelRatio, maxDpr)
-  maxDpr: 1.5,                     // noise-heavy fragment shader: cap the pixel count on HiDPI
-  minRenderScale: 0.55,            // adaptive floor when frames keep dropping
+  maxDpr: 1.0,                     // two ray marches + a volume per pixel: keep the pixel count honest
+  minRenderScale: 0.5,             // adaptive floor when frames keep dropping
   skipLoader: params.has('skip'),
 
   // Composition ----------------------------------------------------------------
   focal: { x: 0.56, y: 0.5 },      // image point kept in view when the viewport crops (portrait)
+  cardScale: 0.72,  // "like the size you just had"                 // glass card size relative to the reference's card rect
+  cardShiftY: 0.075,               // image-uv: slide the card down (still over the eyes) to free the fox's room
   linePeriodPx: { native: 11, min: 9, max: 18 }, // contour line spacing: native px scaled, clamped
 
   // Loader ---------------------------------------------------------------------

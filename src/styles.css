@@ -1,7 +1,15 @@
 /* ============================================================
-   JNSN — UI layer over the full-screen WebGL canvas
-   Layers: #gl (canvas) < #ui / .card (z 2) < #loader (z 3)
+   JNSN - UI layer over the full-screen WebGL canvas
+   Brutalist tech: pure #000 / #fff, a 2px line weight, JetBrains
+   Mono, hard corners. No radius, no soft shadow, no gradient.
+   Layers: #gl (canvas) < #ui: .card (z 1), .hud (z 2) < #loader (z 3)
    ============================================================ */
+
+:root {
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  --line: 2px; /* rule weight (the loader bar); the blocks themselves carry no borders */
+  --hud-inset: 14px;
+}
 
 /* ---------- reset ---------- */
 
@@ -20,7 +28,7 @@ body {
   /* dvh tracks the collapsing mobile browser chrome; vh is the fallback */
   height: 100vh;
   height: 100dvh;
-  font-family: 'Syne', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: var(--mono);
 }
 
 /* ---------- WebGL canvas ---------- */
@@ -65,7 +73,7 @@ body {
   display: grid;
   place-items: center;
   font: 800 clamp(40px, 10vw, 160px) / 1 'Syne', system-ui, sans-serif;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
@@ -79,12 +87,13 @@ body {
   --card-h: 120;
   /* entrance state, driven by springs in ui.js */
   --card-opacity: 0;
-  --card-scale: 0.94;
-  --card-rise: 10;
+  --card-scale: 0.97;
+  --card-rise: 6;
 
   position: fixed;
   left: 0;
   top: 0;
+  z-index: 1;
   box-sizing: border-box;
   width: calc(var(--card-w) * 1px);
   height: calc(var(--card-h) * 1px);
@@ -118,9 +127,9 @@ body {
   visibility: visible;
 }
 
-/* hide(): a plain fade, no spring needed (duration mirrored in ui.js) */
+/* hide(): a plain fade (duration mirrored in ui.js) */
 .card.is-leaving {
-  transition: opacity 0.25s ease-out;
+  transition: opacity 0.25s linear;
 }
 
 /* no backdrop blur available: a milkier card still reads as glass */
@@ -136,8 +145,8 @@ body {
   flex: none;
   display: block;
   height: calc(var(--card-h) * 0.46px);
-  /* matches the SVG viewBox (120 x 150) so width resolves before the SVG lands */
-  aspect-ratio: 120 / 150;
+  /* matches the mark's viewBox (120 x 120) so width resolves before the SVG lands */
+  aspect-ratio: 1 / 1;
   width: auto;
 }
 
@@ -166,6 +175,54 @@ body {
   user-select: none;
 }
 
+/* ---------- corner HUD readouts ---------- */
+
+.hud {
+  position: fixed;
+  z-index: 2;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  border: 0;
+  background: #000;
+  color: #fff;
+  font: 500 clamp(10px, 0.8vw, 13px) / 1.4 var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.hud--tl {
+  top: calc(var(--hud-inset) + env(safe-area-inset-top, 0px));
+  left: calc(var(--hud-inset) + env(safe-area-inset-left, 0px));
+}
+
+.hud--tr {
+  top: calc(var(--hud-inset) + env(safe-area-inset-top, 0px));
+  right: calc(var(--hud-inset) + env(safe-area-inset-right, 0px));
+}
+
+.hud--bl {
+  bottom: calc(var(--hud-inset) + env(safe-area-inset-bottom, 0px));
+  left: calc(var(--hud-inset) + env(safe-area-inset-left, 0px));
+}
+
+.hud--br {
+  bottom: calc(var(--hud-inset) + env(safe-area-inset-bottom, 0px));
+  right: calc(var(--hud-inset) + env(safe-area-inset-right, 0px));
+}
+
+/* narrow phones: only the two left readouts stay, so nothing crowds the card */
+@media (max-width: 479.98px) {
+  .hud--tr,
+  .hud--br {
+    display: none;
+  }
+}
+
 /* ---------- loader: hard black and white on the red ---------- */
 
 #loader {
@@ -176,32 +233,44 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 18px;
+  gap: 14px;
   pointer-events: none;
-  transition:
-    opacity 0.45s ease-out,
-    transform 0.45s ease-out;
+  /* a straight cut, no easing */
+  transition: opacity 0.35s linear;
 }
 
 #loader.is-done {
   opacity: 0;
-  transform: translateY(-10px);
 }
 
 #loader.is-hidden {
   display: none;
 }
 
-.loader__num {
-  padding: 6px 14px;
-  border-radius: 0;
+.loader__box {
+  box-sizing: border-box;
+  min-width: 7ch;
+  padding: 10px 16px 12px;
+  border: 0;
   background: #000;
   color: #fff;
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-weight: 500;
-  font-size: clamp(44px, 7vw, 104px);
+  text-align: right;
+}
+
+.loader__label {
+  margin: 0 0 6px;
+  font: 500 clamp(9px, 1.1vw, 12px) / 1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
+  color: #fff;
+  opacity: 0.8;
+}
+
+.loader__num {
+  font: 800 clamp(44px, 7vw, 104px) / 1 var(--mono);
   font-variant-numeric: tabular-nums;
-  line-height: 1;
+  color: #fff;
   white-space: nowrap;
 }
 
@@ -218,9 +287,10 @@ body {
   margin-left: 0.12em;
 }
 
+/* the progress rule: a black track on the red, white fill driven by ui.js */
 .loader__rule {
-  width: 168px;
-  height: 2px;
+  width: 180px;
+  height: var(--line);
   background: #000;
 }
 

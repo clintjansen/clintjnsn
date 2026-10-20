@@ -1,25 +1,27 @@
 /**
- * logo.js — the abstract JNSN mark: ember, flame tongue, flung spark.
+ * logo.js — the JNSN mark: one unbroken stroke.
  *
- * Three solid fills, no strokes or gradients, so it survives any size and
- * inherits its colour from `currentColor`. No width/height attributes: the
- * host element sizes it through CSS (see .card__logo in styles.css).
+ * A single rectilinear line of constant 12-unit thickness travels J -> N -> S -> N:
+ * the hook and first stem are the J, stem + top bar + stem the first N, the stepped
+ * half-stems around the middle bar the S, stem + bottom bar + stem the last N. It reads
+ * as an abstract meander first and the four letters second, like the contour lines in
+ * the art. One filled polygon, no strokes, no gradients; colour comes from `currentColor`.
  *
- * Geometry notes (viewBox 120 x 150):
- *   ember  circle at (30,130) r12
- *   flame  base spans x 28..64 at y 84..114, tip at (94,16); outer edge is
- *          convex, inner edge concave so it leans like a flame blown back
- *   spark  pointed leaf 20 x 8 at (107,24), long axis along the flame's own
- *          direction; big enough to still read at a 60 px tall mark
- *   gaps   ember/flame ~7 units, flame tip/spark ~11 units (both >= 6)
+ * Geometry (viewBox 120 x 120): bounding box x 14-106, y 12-108; stems at x 14-26, 34-46,
+ * 54-66, 74-86, 94-106; channels between them 8 units; bars at y 12-24, 54-66, 96-108.
  */
 
 export const logoAlt = 'JNSN mark';
 
 export const logoSVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 150" ' +
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" ' +
   'preserveAspectRatio="xMidYMid meet" fill="currentColor" aria-hidden="true" focusable="false">' +
-  '<circle cx="30" cy="130" r="12"/>' +
-  '<path d="M94 16C70 30 34 52 28 84C22 100 30 114 46 114C62 114 70 100 64 88C62 66 80 38 94 16Z"/>' +
-  '<path d="M-10 0Q0-8 10 0Q0 8-10 0Z" transform="translate(107 24) rotate(-55)"/>' +
+  '<polygon points="34,12 66,12 66,54 86,54 86,96 94,96 94,12 106,12 106,108 74,108 74,66 54,66 54,24 46,24 46,108 14,108 14,72 26,72 26,96 34,96"/>' +
+  '</svg>';
+
+/** The J-hook alone: the favicon glyph (the whole meander fills in at 16 px). */
+export const faviconSVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
+  '<rect width="64" height="64" rx="12" fill="#d8371d"/>' +
+  '<polygon fill="#fff" points="26,10 54,10 54,21 36,21 36,54 10,54 10,34 21,34 21,43 26,43"/>' +
   '</svg>';

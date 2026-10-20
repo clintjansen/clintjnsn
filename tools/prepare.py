@@ -147,6 +147,33 @@ def membrane_fill(values, known, iters=(1500, 160, 80, 40, 20, 14)):
     return sol
 
 
+def reflect_edges(img, rect, depth_x, depth_y):
+    """
+    Blend a mirrored copy of the surroundings into the edges of an inpainted rect, so the
+    texture outside continues a little way in instead of stopping on a straight line.
+    """
+    x0, y0, x1, y1 = rect
+    out = img.copy()
+    H, W = img.shape[:2]
+    for d in range(depth_y):
+        w = (1.0 - d / depth_y) ** 2
+        y, src = y0 + d, y0 - 1 - d
+        if y < y1 and src >= 0:
+            out[y, x0:x1] = out[y, x0:x1] * (1 - w) + img[src, x0:x1] * w
+        y, src = y1 - 1 - d, y1 + d
+        if y >= y0 and src < H:
+            out[y, x0:x1] = out[y, x0:x1] * (1 - w) + img[src, x0:x1] * w
+    for d in range(depth_x):
+        w = (1.0 - d / depth_x) ** 2
+        x, src = x0 + d, x0 - 1 - d
+        if x < x1 and src >= 0:
+            out[y0:y1, x] = out[y0:y1, x] * (1 - w) + img[y0:y1, src] * w
+        x, src = x1 - 1 - d, x1 + d
+        if x >= x0 and src < W:
+            out[y0:y1, x] = out[y0:y1, x] * (1 - w) + img[y0:y1, src] * w
+    return out
+
+
 def rgb_to_hsv(a):
     r, g, b = a[..., 0], a[..., 1], a[..., 2]
     mx = a.max(-1)
@@ -234,39 +261,55 @@ def main():
     labels[:, -2:] = labels[:, -3:-2]
     onehot = np.eye(4, dtype=np.float32)[labels]
 
-    # ---- 3. soft partition masks --------------------------------------------------------
-    mask = gauss(onehot, MASK_FEATHER)
-    mask /= np.maximum(mask.sum(-1, keepdims=True), 1e-6)
+    # ---- 2b. the character is modelled in the shader: take him (and his hair) off the plates
+    # an organic cut between the (removed) hair and the (kept) fox, not a straight line
+    wave = 48 * np.sin(ys_ * 0.021 + 0.4) + 26 * np.sin(ys_ * 0.057 + 1.3)
+    hair_px = (labels == B) & (xs_ < HAIR_SPLIT_X + wave) & (ys_ < 470)
+    figure_px = (labels == P) | hair_px
+    plate_known = outside_card & ~figure_px
+    onehot_bg = onehot.copy()
+    onehot_bg[..., P] = 0.0
+    soft_bg = membrane_fill(onehot_bg, plate_known)
+    labels_bg = soft_bg[..., 1:].argmax(-1) + 1          # B, M or Wt only: what is behind him
+    onehot_bg = np.eye(4, dtype=np.float32)[labels_bg]
 
-    # ---- 4. colour base: inpaint the card, then remove the line texture ------------------
-    detail_rgb = membrane_fill(img, outside_card)
+    # ---- 3. soft partition masks of the background; R keeps the reference silhouette --------
+    mask = gauss(onehot_bg, MASK_FEATHER)
+    mask /= np.maximum(mask.sum(-1, keepdims=True), 1e-6)
+    mask[..., 0] = gauss(figure_px.astype(np.float32), MASK_FEATHER)
+
+    # ---- 4. colour plates: inpaint the card and the character, remove the line texture -----
+    # Fill each background region from its own colours only (no purple magma/pale blends):
+    # magma pixels are filled from magma, pale from pale, fox from fox.
+    detail_rgb = np.zeros_like(img)
+    for k in (1, 2, 3):
+        region = labels_bg == k
+        fill_k = membrane_fill(img, plate_known & region)
+        detail_rgb += fill_k * region[..., None]
+    detail_rgb = reflect_edges(detail_rgb, CARD, 120, 50)
     lum0 = detail_rgb @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
     period = line_period(lum0, (20, 380, 220, 520))
     print(f'row-crossing line period ~{period:.1f} px (true spacing ~11 px); base blur sigma {LINE_SIGMA}')
-    base_rgb = region_blur(detail_rgb, onehot, LINE_SIGMA)
+    base_rgb = region_blur(detail_rgb, onehot_bg, LINE_SIGMA)
 
-    # ---- 5. shine: hot orange/yellow highlights on or next to the character --------------
-    h2, s2, v2 = rgb_to_hsv(img)
-    hot = (h2 >= 20) & (h2 <= 62) & (s2 > 0.55) & (v2 > 0.66)
-    near_person = gauss(onehot[..., 0], 14.0) > 0.03
-    shine = gauss((hot & near_person & outside_card).astype(np.float32), 1.5)
-    shine = np.clip(shine * 1.6, 0, 1)
+    # ---- 5. (the character's highlights are now lit in 3D: no baked shine) -----------------
+    shine = np.zeros((H, W), dtype=np.float32)
 
-    # ---- 6. baked line texture (high-pass luminance) for optional use on the character ---
+    # ---- 6. baked line texture (high-pass luminance) ---------------------------------------
     lum = detail_rgb @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
     highpass = lum - gauss(lum, LINE_SIGMA)
     baked = np.clip(0.5 + highpass * 3.0, 0, 1)
 
     # ---- 7. helper fields --------------------------------------------------------------
-    figure = onehot[..., 0] + onehot[..., 1]
     fields = np.stack([
-        np.clip(gauss(figure, 40.0), 0, 1),
-        np.clip(gauss(onehot[..., 0], 12.0) * 1.6, 0, 1),
-        np.clip(gauss(onehot[..., 1], 20.0), 0, 1),
+        np.clip(gauss(figure_px.astype(np.float32), 40.0), 0, 1),   # where the figure sits (lines wrap)
+        np.zeros((H, W), dtype=np.float32),
+        np.clip(gauss(onehot_bg[..., 1], 20.0), 0, 1),             # fox, soft
     ], -1)
-    # Wide and soft: the flames fade across the split instead of stopping at a line.
-    hair = np.clip(gauss(onehot[..., 1] * (np.arange(W)[None, :] < HAIR_SPLIT_X), 28.0) * 1.3, 0, 1)
+    hair = np.zeros((H, W), dtype=np.float32)
     extra = np.stack([hair, shine, baked], -1)
+    onehot = onehot_bg
+    onehot[..., 0] = figure_px
 
     # ---- 8. write textures (RGB only: colour hidden under alpha 0 is not safe in WebGL) ---
     sizes = {
@@ -299,7 +342,8 @@ def main():
 
     # ---- 9. debug images -----------------------------------------------------------------
     palette = np.array([[0.1, 0.1, 0.4], [0.3, 0.7, 1.0], [0.9, 0.2, 0.1], [0.95, 0.95, 0.9]], dtype=np.float32)
-    save_png(os.path.join(DBG, 'labels.png'), onehot @ palette)
+    save_png(os.path.join(DBG, 'labels.png'), onehot_bg @ palette)
+    save_png(os.path.join(DBG, 'figure.png'), np.repeat(figure_px.astype(np.float32)[..., None], 3, -1))
     save_png(os.path.join(DBG, 'labels_direct.png'), np.where(known[..., None], np.stack([person, blue, magma, white], -1).astype(np.float32) @ palette, 0.0))
     save_png(os.path.join(DBG, 'base.png'), base_rgb)
     save_png(os.path.join(DBG, 'detail.png'), detail_rgb)

@@ -3,9 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>JNSN</title>
-  <meta name="description" content="JNSN" />
+  <title>JNSN &mdash; No. 001</title>
+  <meta name="description" content="JNSN. Art piece No. 001 / 2026: a live WebGL painting of flowing magma, a navy bust with blue flame hair and a glowing spirit fox." />
   <meta name="theme-color" content="#d8371d" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
 
   <!-- Fonts are self-hosted (@fontsource, imported from main.js): nothing third-party blocks first paint. -->
   <link rel="stylesheet" href="/src/styles.css" />
@@ -17,17 +20,28 @@
   <canvas id="gl" aria-hidden="true"></canvas>
 
   <main id="ui">
+    <!-- the stamp: a metadata strip over the mark and the wordmark; placed by ui.js layout() -->
     <div id="card" class="card">
       <span class="card__logo"></span>
       <h1 class="card__word">JNSN</h1>
     </div>
+
+    <!-- corner readouts, rewritten every frame by createHud() in ui.js; decorative for assistive tech -->
+    <div class="hud hud--tl" aria-hidden="true">JNSN</div>
+    <div class="hud hud--tr" id="hud-xy" aria-hidden="true">X 0.000 / Y 0.000</div>
+    <div class="hud hud--bl" id="hud-stats" aria-hidden="true">24 FPS / 0 x 0</div>
+    <div class="hud hud--br" id="hud-phase" aria-hidden="true">LOADING</div>
+
     <noscript>JNSN</noscript>
   </main>
 
   <div id="loader">
     <!-- the visual counter is decorative for assistive tech; one calm status line instead -->
     <span class="sr-only" role="status" aria-live="polite" id="loader-status">Loading</span>
-    <div class="loader__num" aria-hidden="true"><span class="loader__digits">0</span><span class="loader__pct">%</span></div>
+    <div class="loader__box" aria-hidden="true">
+      <div class="loader__label">LOADING</div>
+      <div class="loader__num"><span class="loader__digits">0</span><span class="loader__pct">%</span></div>
+    </div>
     <div class="loader__rule" aria-hidden="true"><i></i></div>
   </div>
 
