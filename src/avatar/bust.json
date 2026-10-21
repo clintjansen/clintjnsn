@@ -1,23 +1,23 @@
 {
   "units": "backdrop image heights; X right, Y up, Z towards the viewer; rest pose = painting",
-  "vertexCount": 23029,
-  "indexCount": 137997,
+  "vertexCount": 28002,
+  "indexCount": 168000,
   "indexType": "uint16",
   "posMin": [
-    0.1680061161407449,
-    -0.3152980322483927,
-    -0.22199799474980902
+    0.1706775426864624,
+    -0.2874874770641327,
+    -0.448811799287796
   ],
   "posMax": [
-    1.199211917409973,
-    1.0334356835056495,
-    0.22189077673092422
+    1.1978099346160889,
+    1.0318043231964111,
+    0.44842082262039185
   ],
   "layout": {
     "position": 0,
-    "normal": 138176,
-    "skinWeight": 230292,
-    "index": 322408
+    "normal": 168012,
+    "skinWeight": 280020,
+    "index": 392028
   },
   "bones": {
     "order": [
@@ -95,11 +95,11 @@
   "scalp": {
     "bone": "head",
     "capDir": [
-      -0.8,
-      0.6,
+      -0.275,
+      0.961,
       0.0
     ],
-    "capCos": -0.5,
+    "capCos": -0.644,
     "center": [
       0.8586007082673556,
       0.7088959341606758,

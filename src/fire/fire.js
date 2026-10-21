@@ -14,13 +14,30 @@
  *   -> curl -> vorticity confinement -> divergence
  *   -> pressure: restrict to a half-resolution grid, Jacobi x pressureIterations there, prolong,
  *      Jacobi x pressureFine on the full grid (multigrid = 0: plain Jacobi on the full grid)
- *   -> subtract gradient -> advect scalars (+ emission, decay, wall fade)
+ *   -> subtract gradient -> advect scalars (+ emission, decay, wall fade, light through the fuel;
+ *      optionally MacCormack, sharpAdvect > 0, one extra pass)
  *   -> per-column occupied z range (+ dilation) for the renderer.
+ * The head moves as a rigid body: obstacles carry the velocity of their full rigid motion (from
+ * this step's and the last step's matrices, so a turning skull sweeps the air), the air and the
+ * fuel in the scalp shell move with the scalp (scalpDrag, attach), obstacle cells take a share
+ * of the surrounding fuel (solidFill: the flames end at the real skin, not at the voxelised
+ * ellipsoid), and the emitter cap follows only part of the head's yaw (capFollow), so when he
+ * glances at the viewer the side of the skull that turns towards the camera keeps burning.
  * Rendering: half-resolution front-to-back ray march along the view rays, clipped to the box,
  * to the occupied column range and to the bust's depth (nearest and farthest of the covered
  * full-resolution texels, two outputs); a full-screen composite upsamples them depth-aware
  * (bilinear over the neighbours of the pixel's own kind, bust or background) and blends
- * premultiplied (ONE, ONE_MINUS_SRC_ALPHA).
+ * premultiplied (ONE, ONE_MINUS_SRC_ALPHA). Two colour models: per sample (an opacity contrast
+ * curve, the light through the fuel computed in the simulation: lit crests climb the ramp, folds
+ * sink to deep blue) or, with gradientMap = 1 (the page), one colour per ray from the fuel it
+ * crossed, its age and its height (the painting's flat, saturated colour fields), with an opacity
+ * curve and a glowing iridescent rim against the background. Both use a flow-advected detail warp,
+ * and the drawn plume can widen with height around a vertical axis (fanBack / fanFront: the
+ * painting's composition).
+ *
+ * The box: the Z walls face the camera, so they never fade as a visible edge; a head turned
+ * towards the viewer (yaw 0.5) brings the skull to z ~ 0.34, so the box needs room in front of
+ * it (max z ~ 0.5) for the flames on that side.
  *
  * World space: units = backdrop image heights, X right, Y up, Z towards the viewer.
  */
@@ -84,7 +101,20 @@ export const DEFAULT_PARAMS = {
   emitUp: 1.0,             //   straight up,
   emitBack: 0.0,           //   and backwards (-X)
   emitVelRate: 7.0,        // how fast shell velocity reaches that push (1/s)
+  emitDepth: 0.35,         // share of the outward push kept along Z (towards / away from the viewer):
+                           //   on the side of the skull that faces the camera the flames climb over
+                           //   the head instead of leaving it through the front of the box
+  scalpDrag: 1.0,          // share of the scalp's own motion given to the air it releases
+  attach: 0.85,            // how much the fuel in the scalp shell rides with the scalp when the head
+                           //   moves (0 = left behind in the air, 1 = carried like hair)
+  obstacleSpin: 1.0,       // obstacle velocity: 1 = full rigid motion (turning skull sweeps the air),
+                           //   0 = the caller's centre velocity only
+  solidFill: 0.9,          // share of its neighbours' fuel a solid (obstacle) cell takes each step: the
+                           //   flames end at the real skin, not at the ellipsoid's voxel staircase
+                           //   (0 = empty obstacles)
   shell: 0.9,              // emitter shell thickness (cranium unit-sphere units)
+  shellFront: 1.0,         // its share over the face front (thin: the flames rise along the forehead and keep
+                           //   the profile clean instead of bulging in front of it)
   tongueScale: 2.6,        // tongues across the scalp (noise cells over the cap radius)
   tongueSpeed: 0.35,       // tongue drift
   tongueLo: 0.40,          // noise -> tongue contrast window
@@ -94,10 +124,18 @@ export const DEFAULT_PARAMS = {
   hairline: 0.25,          // noise pull-in of the cap edge (cosine units): an irregular hairline
   hairlineScale: 3.0,      // its noise cells around the cap
   hairlineSoft: 0.2,       // cap edge fade width (cosine units)
+  capFollow: 0.15,         // share of the head's yaw the cap (hairline) follows (1 = rides the head):
+                           //   below 1, a head turned towards the viewer keeps the crown engulfed on
+                           //   the side facing the camera (the face stays clear: pitch and roll still
+                           //   carry the cap, only the yaw is held back)
   sides: 0.0,              // less emission on the sides of the skull (0 = even, 1 = none at the sides)
   decay: 0.05,             // fuel decay (1/s)
   ageDecay: 0.1,           // extra decay per second of age (1/s^2)
-  wallFade: 2.5,           // cells over which scalars fade out at the box walls
+  sharpAdvect: 0.0,        // MacCormack transport of the fuel (0 = plain semi-Lagrangian, 1 = full
+                           //   correction; one extra pass): flames keep their edges as they rise
+  wallFade: 2.5,           // cells over which scalars fade out at the X/Y box walls
+  wallFadeZ: 0.0,          // the same at the Z walls (cells; 0 = none): they face the camera and never
+                           //   show as an edge, and a head turned to the viewer has its flames there
   wallFadeRate: 6.0,       // strength of that fade (1/s)
   pointerRadius: 0.06,     // Gaussian radius of the pointer push (world units)
   pointerStrength: 1.0,    // fraction of the pointer speed given to the air
@@ -108,8 +146,37 @@ export const DEFAULT_PARAMS = {
   absorption: 70.0,        // opacity per unit fuel per world unit
   exposure: 1.0,
   shoulder: 0.88,          // composite soft-clip knee
+  whiteSpill: 0.6,         // energy above the knee that bleeds into white (hot blue turns white; 0 keeps
+                           //   the painting's saturated violet-blue at full brightness)
+  heightLo: 0.55,          // the painting's vertical gradient: world height where the ramp starts (the brow)
+  heightHi: 1.0,           //   and where it ends (the top of the frame)
+  heightMix: 0.0,          //   share of height in the ramp position (0 = age only)
+  heightWobble: 0.06,      //   detail-noise wobble of it (share of the span)
+  rimWarm: 0.0,            // thin edges: 0 glow light blue, 1 iridescent like the painting (violet, pink,
+                           //   orange, peach)
+  // gradient map: one colour per ray from the fuel it crossed and the height of that fuel, like the
+  // painting's smooth colour fields (the plume's core light, its body violet-blue, its edges rimmed)
+  gradientMap: 0.0,        //   share of it in the result (0 = per-sample colour along the ray)
+  mapFuel: 0.25,           //   fuel along the ray (fuel x world units) that reaches the middle of the ramp
+  mapRim: 0.04,            //   fuel along the ray below which the ray counts as a rim
+  mapHeight: 0.5,          //   share of the ramp position from height (rest: fuel along the ray)
+  mapAge: 0.0,             //   share of the fuel's age (vs the fuel along the ray) in the rest: age runs along each
+                           //   tongue from the scalp, so the colour follows the flames instead of banding by height
+  rimGlow: 0.0,            //   added light along the fire's edge against the background (the painting's glowing rims)
+  mapBustSoft: 0.0,        //   over the head the curve starts at 0 and ends this much later (a soft fade into the face)
+  mapAlphaLo: 0.0,         //   opacity curve: the ray's opacity is remapped by smoothstep(lo, hi), so the
+  mapAlphaHi: 1.0,         //   plume is solid inside with a short soft edge (no translucent veils)
+  // fan: the plume drawn wider with height around a vertical axis (the painting's composition: the
+  // flames behind the head lean up and back, the ones over the face up and forwards); 0 = off
+  fanX: 0.99,              //   axis X (world; the skull's centre)
+  fanLo: 0.62,             //   height where the spread starts
+  fanHi: 1.05,             //   height where it is full
+  fanBack: 0.0,            //   extra width behind the axis at full height (0.5 = half as wide again)
+  fanFront: 0.0,           //   the same in front of it
   ageSpan: 0.8,            // seconds for fuel to reach the bright end of the ramp (cores)
-  cooling: 0.6,            // fall back towards blue per ageSpan after that peak
+  cooling: 0.3,            // fall back towards blue per ageSpan after that peak. Keep it low and let the
+                           //   light darken the body: a strong fall-back draws thin bright seams
+                           //   wherever young and old fuel mix (their mean age sits on the peak)
   coreDensity: 1.0,        // denser fuel reaches the bright end sooner
   warmth: 1.0,             // share of the warm family (0 = all tongues cool)
   warmLo: 0.56,            // tongue phase window where the warm family takes over
@@ -125,11 +192,28 @@ export const DEFAULT_PARAMS = {
   edgeFade: 8.0,           // render fade at the box walls (cells), so the box never shows
   edgeFadeTop: 2.0,        // the same at the top wall (cells): it sits above the image, so the
                            //   plume runs off the top of the frame at full strength
-  detail: 0.02,            // flow-noise warp amplitude (world units)
-  detailScale: 4.0,        // noise cells per world unit
+  edgeFadeZ: 1.0,          // the same at the Z walls (cells): parallel to the screen, never an edge
+  // light through the fuel (computed in the simulation, stored with the scalars): lit crests and
+  // dark folds give every tongue its own shape
+  shadow: 14.0,            // extinction of that light per unit fuel per world unit (0 = off, skips it)
+  lightStep: 2.5,          // light-march step (cells; 6 steps)
+  lightX: 0.5,             // direction towards the light (world; normalised): from above and a little
+  lightY: 1.0,             //   from the front (the pale side of the painting); not from the viewer, or
+  lightZ: 0.0,             //   every surface facing the camera turns pale
+  lightRamp: 0.6,          // ramp lift of the lit fuel (towards cyan / white) and drop of the unlit
+  lightMid: 0.7,           //   light level that keeps its ramp position
+  shadowDark: 0.35,        // darkening of the unlit folds (deep ultramarine between the tongues)
+  densityKnee: 0.5,        // opacity contrast: fuel below the knee turns clear faster than linearly,
+  densityContrast: 1.0,    //   so tongues end in soft but defined edges instead of a haze (0 = linear)
+  densitySoft: 0.6,        //   share of the knee the curve ramps over (1 = from 0; smaller = crisper)
+  bands: 0,                // colour bands along the ramp (0 = smooth): painterly zones with clear steps
+  bandSoft: 0.3,           //   softness of the steps (0.5 = smooth again)
+  detail: 0.026,           // flow-noise warp amplitude (world units)
+  detailScale: 5.0,        // noise cells per world unit
   detailPeriod: 2.4,       // flow-noise phase length (s)
   detailTwist: 4.0,        // warp rotation per world unit of depth (rad)
-  debug: 0,                // 0 final, 1 raw fuel (grey), 2 fuel coloured by age, 3 tongue phase (warm/cool)
+  detailFine: 0.0,         // a finer (2.7x) octave of that warp, relative amplitude
+  debug: 0,                // 0 final, 1 raw fuel (grey), 2 fuel coloured by age, 3 tongue phase (warm/cool), 4 light
 };
 
 const TRIANGLE = new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]);
@@ -182,6 +266,7 @@ export function createFire(renderer, options = {}) {
   let presB = makeTarget(AW, AH, THREE.RGFormat);
   let scalA = makeTarget(AW, AH);
   let scalB = makeTarget(AW, AH);
+  const scalPre = makeTarget(AW, AH);   // MacCormack: plain advected scalars (sharpAdvect > 0)
   let coarseA = makeTarget(CNX * CTX, CNY * CTY, THREE.RGFormat);
   let coarseB = makeTarget(CNX * CTX, CNY * CTY, THREE.RGFormat);
   const curlRT = makeTarget(AW, AH);
@@ -189,7 +274,7 @@ export function createFire(renderer, options = {}) {
   const colRT = makeTarget(NX, NY);
   // the fire itself: [0] up to the nearest bust depth, [1] up to the farthest (see march)
   const fireRT = makeTarget(2, 2, THREE.RGBAFormat, 2);
-  const simTargets = () => [velA, velB, presA, presB, coarseA, coarseB, scalA, scalB, curlRT, colRaw, colRT];
+  const simTargets = () => [velA, velB, presA, presB, coarseA, coarseB, scalA, scalB, scalPre, curlRT, colRaw, colRT];
 
   const noiseTex = createNoiseTexture();
 
@@ -204,9 +289,12 @@ export function createFire(renderer, options = {}) {
     uIntensity: { value: 1 },
     uNoise: { value: noiseTex },
     uScalp: { value: new THREE.Matrix4() },
+    uScalpMotion: { value: new THREE.Matrix4().makeScale(0, 0, 0) },
+    uScalpCap: { value: new THREE.Matrix4() },
     uCapDir: { value: new THREE.Vector3(-0.45, 0.89, 0).normalize() },
     uCapCos: { value: 0.15 },
     uShell: { value: params.shell },
+    uShellFront: { value: params.shellFront },
     uEmitOn: { value: 0 },
     uTongue: { value: new THREE.Vector4() },
     uTongueFloor: { value: 0 },
@@ -234,13 +322,14 @@ export function createFire(renderer, options = {}) {
   }
 
   const obsMats = Array.from({ length: 6 }, () => new THREE.Matrix4());
-  const obsVel = Array.from({ length: 6 }, () => new THREE.Vector3());
+  // per obstacle: world position -> velocity (an affine map: the rigid motion since the last step)
+  const obsMotion = Array.from({ length: 6 }, () => new THREE.Matrix4().makeScale(0, 0, 0));
 
   const mAdvectVel = passMaterial(advectVelocityFrag, {
     uVel: { value: null },
     uScal: { value: null },
     uObs: { value: obsMats },
-    uObsVel: { value: obsVel },
+    uObsMotion: { value: obsMotion },
     uObsCount: { value: 0 },
     uBuoyancy: { value: 0 },
     uWindDir: { value: new THREE.Vector3() },
@@ -249,7 +338,7 @@ export function createFire(renderer, options = {}) {
     uWindAge: { value: new THREE.Vector2() },
     uTurb: { value: new THREE.Vector4() },
     uEmitVel: { value: new THREE.Vector4() },
-    uEmitVelRate: { value: 0 },
+    uEmitVel2: { value: new THREE.Vector3() },
     uPointer: { value: new THREE.Vector4() },
     uPointerParams: { value: new THREE.Vector3() },
   }, emitterGlsl, 'advect-velocity');
@@ -272,9 +361,17 @@ export function createFire(renderer, options = {}) {
     uScal: { value: null },
     uDecay: { value: new THREE.Vector2() },
     uEmit: { value: new THREE.Vector2() },
-    uWallFade: { value: new THREE.Vector2() },
+    uWallFade: { value: new THREE.Vector3() },
     uHeadStart: { value: 0 },
+    uAttach: { value: 0 },
+    uLight: { value: new THREE.Vector4() },
+    uPre: { value: scalPre.texture },
+    uSharp: { value: 0 },
+    uSolidFill: { value: 0 },
   }, emitterGlsl, 'advect-scalars');
+  // the MacCormack pre-pass: the same program with ADVECT_PRE, sharing the uniform objects
+  const mAdvectPre = passMaterial(advectScalarsFrag, {}, emitterGlsl, 'advect-pre', { ...defines, ADVECT_PRE: 1 });
+  mAdvectPre.uniforms = mAdvectScal.uniforms;
   const mColumns = passMaterial(columnsFrag, {
     uScal: { value: null }, uVel: { value: null }, uThreshold: { value: 0.003 },
   }, '', 'columns');
@@ -292,8 +389,20 @@ export function createFire(renderer, options = {}) {
     uShade: { value: new THREE.Vector4() },
     uGlow: { value: new THREE.Vector4() },
     uIris: { value: new THREE.Vector4() },
-    uEdge: { value: new THREE.Vector2() },
+    uEdge: { value: new THREE.Vector3() },
     uWarmSel: { value: new THREE.Vector4() },
+    uLit: { value: new THREE.Vector4() },
+    uDensity: { value: new THREE.Vector3() },
+    uHeight: { value: new THREE.Vector4() },
+    uRimWarm: { value: 0 },
+    uMap: { value: new THREE.Vector4() },
+    uFan: { value: new THREE.Vector4() },
+    uFanFront: { value: 0 },
+    uMapAlpha: { value: new THREE.Vector2(0, 1) },
+    uMapAge: { value: 0 },
+    uMapBust: { value: 0 },
+    uRimGlow: { value: 0 },
+    uBands: { value: new THREE.Vector2() },
     uDebug: { value: 0 },
   }, '', 'march');
 
@@ -310,6 +419,7 @@ export function createFire(renderer, options = {}) {
       uDepthSize: { value: new THREE.Vector2(1, 1) },
       uExposure: { value: 1 },
       uShoulder: { value: 0.78 },
+      uSpill: { value: 0.6 },
       uRaw: { value: 0 },
     },
     transparent: true,
@@ -348,7 +458,7 @@ export function createFire(renderer, options = {}) {
    */
   async function compileAsync() {
     const mats = [mAdvectVel, mCurl, mConfine, mDivergence, mRestrict, mJacobiCoarse, mProlong,
-      mJacobi, mGradient, mAdvectScal, mColumns, mDilate, mMarch];
+      mJacobi, mGradient, mAdvectPre, mAdvectScal, mColumns, mDilate, mMarch];
     const prevMat = passMesh.material;
     for (const m of mats) {
       // three compiles synchronously inside compileAsync and only waits asynchronously, so the
@@ -396,6 +506,51 @@ export function createFire(renderer, options = {}) {
   // ---------------------------------------------------------------- step
   let time = 0;
 
+  // Last step's obstacle and scalp matrices (world -> unit sphere), for their rigid motion: a
+  // turning skull sweeps the air with its surface (its centre barely moves), and the fuel at
+  // the roots rides with the scalp.
+  const obsPrev = Array.from({ length: 6 }, () => new THREE.Matrix4());
+  const obsPrevOk = new Array(6).fill(false);
+  const scalpPrev = new THREE.Matrix4();
+  let scalpPrevOk = false;
+  const mInv = new THREE.Matrix4();
+  const mRigid = new THREE.Matrix4();
+  const lightDir = new THREE.Vector3();
+  const capAxis = new THREE.Vector3();
+  const capCentre = new THREE.Vector3();
+  const mYaw = new THREE.Matrix4();
+
+  /**
+   * out = scalp * (rotation about world Y through the scalp centre by (1 - follow) * yaw): the
+   * scalp as if the head had turned only `follow` of its yaw. The yaw is read from the scalp's own
+   * local X axis (its forward axis lies in the image plane at rest).
+   */
+  function capFrame(scalp, follow, out) {
+    out.copy(scalp);
+    if (follow >= 1) return out;
+    mInv.copy(scalp).invert();   // unit sphere -> world
+    const e = mInv.elements;
+    capAxis.set(e[0], e[1], e[2]);
+    capCentre.set(e[12], e[13], e[14]);
+    if (!(capAxis.x * capAxis.x + capAxis.z * capAxis.z > 1e-10)) return out;
+    const yaw = Math.atan2(-capAxis.z, capAxis.x);
+    if (!Number.isFinite(yaw)) return out;
+    mYaw.makeRotationY((1 - Math.max(follow, 0)) * yaw);
+    mYaw.setPosition(capCentre.x - (mYaw.elements[0] * capCentre.x + mYaw.elements[8] * capCentre.z), 0,
+      capCentre.z - (mYaw.elements[2] * capCentre.x + mYaw.elements[10] * capCentre.z));
+    return out.multiply(mYaw);
+  }
+
+  /** out = (I - prev^-1 * now) / dt: world position -> velocity of the body point there. */
+  function rigidMotion(prev, now, dt, out) {
+    mInv.copy(prev).invert().multiply(now);   // where the body point now at w was one step ago
+    const a = out.elements;
+    const b = mInv.elements;
+    for (let i = 0; i < 16; i++) a[i] = ((i % 5 === 0 ? 1 : 0) - b[i]) / dt;
+    for (let i = 0; i < 16; i++) if (!Number.isFinite(a[i])) { out.makeScale(0, 0, 0); break; }
+    return out;
+  }
+
   function step(dt, frame = NO_FRAME) {
     dt = Math.min(Math.max(Number(dt) || 0, 0), 1 / 20) * params.timeScale;
     if (!(dt > 0)) return;
@@ -407,28 +562,48 @@ export function createFire(renderer, options = {}) {
     // sphere's centre and turn the whole box solid: such obstacles are skipped.
     const obstacles = frame.obstacles || NO_OBSTACLES;
     const velocities = frame.obstacleVelocity;
+    const spin = Math.min(Math.max(Number(params.obstacleSpin) || 0, 0), 1);
     let count = 0;
     for (let i = 0; i < obstacles.length && count < 6; i++) {
       const m = obstacles[i];
       const det = m ? m.determinant() : 0;
-      if (!(Math.abs(det) > 1e-12) || !Number.isFinite(det)) continue;
+      if (!(Math.abs(det) > 1e-12) || !Number.isFinite(det)) {
+        if (i < 6) obsPrevOk[i] = false;
+        continue;
+      }
       obsMats[count].copy(m);
+      // velocity field: the caller's centre velocity, blended into the full rigid motion
       const v = velocities && velocities[i];
-      if (v) obsVel[count].copy(v);
-      else obsVel[count].set(0, 0, 0);
+      const out = obsMotion[count].makeScale(0, 0, 0);
+      if (v && Number.isFinite(v.x + v.y + v.z)) out.setPosition(v);
+      if (i < 6 && obsPrevOk[i] && spin > 0) {
+        rigidMotion(obsPrev[i], m, dt, mRigid);
+        const a = out.elements;
+        const r = mRigid.elements;
+        for (let k = 0; k < 16; k++) a[k] += (r[k] - a[k]) * spin;
+      }
+      if (i < 6) { obsPrev[i].copy(m); obsPrevOk[i] = true; }
       count++;
     }
+    for (let i = obstacles.length; i < 6; i++) obsPrevOk[i] = false;
     for (let i = count; i < 6; i++) {
       obsMats[i].identity();
-      obsVel[i].set(0, 0, 0);
+      obsMotion[i].makeScale(0, 0, 0);
     }
     mAdvectVel.uniforms.uObsCount.value = count;
     const scalpDet = frame.scalp ? frame.scalp.determinant() : 0;
     if (Math.abs(scalpDet) > 1e-12 && Number.isFinite(scalpDet)) {   // (singular: every cell would sit at one radius)
       U.uScalp.value.copy(frame.scalp);
+      capFrame(frame.scalp, params.capFollow, U.uScalpCap.value);
       U.uEmitOn.value = 1;
+      if (scalpPrevOk) rigidMotion(scalpPrev, frame.scalp, dt, U.uScalpMotion.value);
+      else U.uScalpMotion.value.makeScale(0, 0, 0);
+      scalpPrev.copy(frame.scalp);
+      scalpPrevOk = true;
     } else {
       U.uEmitOn.value = 0;
+      U.uScalpMotion.value.makeScale(0, 0, 0);
+      scalpPrevOk = false;
     }
     if (frame.scalpCapDir) U.uCapDir.value.copy(frame.scalpCapDir).normalize();
     if (frame.scalpCapCos !== undefined) U.uCapCos.value = frame.scalpCapCos;
@@ -445,6 +620,7 @@ export function createFire(renderer, options = {}) {
 
     // params -> uniforms
     U.uShell.value = params.shell;
+    U.uShellFront.value = Math.min(Math.max(params.shellFront, 0.05), 1);
     U.uTongue.value.set(params.tongueScale, params.tongueSpeed, params.tongueLo, params.tongueHi);
     U.uTongueFloor.value = params.tongueFloor;
     U.uHairline.value.set(Math.max(0, params.hairline), params.hairlineScale, Math.max(1e-3, params.hairlineSoft), Math.min(Math.max(params.sides, 0), 1));
@@ -455,13 +631,22 @@ export function createFire(renderer, options = {}) {
     pu.uWindAge.value.set(params.windYoung, Math.max(1e-3, params.windAge));
     pu.uTurb.value.set(params.turbulence, params.turbulenceScale, params.turbulenceSpeed, 1.0);
     pu.uEmitVel.value.set(params.emitSpeed, params.emitOut, params.emitUp, params.emitBack);
-    pu.uEmitVelRate.value = params.emitVelRate;
+    pu.uEmitVel2.value.set(params.emitVelRate, Math.min(Math.max(params.emitDepth, 0), 1), params.scalpDrag);
     mConfine.uniforms.uVorticity.value = params.vorticity;
     const su = mAdvectScal.uniforms;
     su.uDecay.value.set(params.decay, params.ageDecay);
     su.uEmit.value.set(params.emission, params.emitRate);
-    su.uWallFade.value.set(params.wallFade, params.wallFadeRate);
+    su.uWallFade.value.set(params.wallFade, params.wallFadeRate, Math.max(0, params.wallFadeZ));
     su.uHeadStart.value = params.headStart;
+    su.uAttach.value = Math.min(Math.max(params.attach, 0), 1);
+    su.uSolidFill.value = Math.min(Math.max(params.solidFill, 0), 0.98);
+    // light march: lightStep cells per step towards the light, extinction per unit fuel per step
+    lightDir.set(params.lightX, params.lightY, params.lightZ);
+    if (!(lightDir.lengthSq() > 1e-8)) lightDir.set(0, 1, 0);
+    lightDir.normalize();
+    const lightWorld = Math.max(0.25, params.lightStep) * (cell.x + cell.y + cell.z) / 3;
+    su.uLight.value.set(lightDir.x * lightWorld / cell.x, lightDir.y * lightWorld / cell.y, lightDir.z * lightWorld / cell.z,
+      params.shadow > 0 ? params.shadow * lightWorld : 0);
 
     saveState();
 
@@ -528,9 +713,11 @@ export function createFire(renderer, options = {}) {
     velA = vSpare;
     velB = v;
 
-    // 4. scalars
+    // 4. scalars (MacCormack when sharpAdvect > 0: plain advection first, then the correction)
     su.uVel.value = velA.texture;
     su.uScal.value = scalA.texture;
+    su.uSharp.value = Math.min(Math.max(Number(params.sharpAdvect) || 0, 0), 1);
+    if (su.uSharp.value > 0) run(mAdvectPre, scalPre);
     run(mAdvectScal, scalB);
     const ts = scalA; scalA = scalB; scalB = ts;
 
@@ -568,7 +755,19 @@ export function createFire(renderer, options = {}) {
     mu.uGlow.value.set(params.brightGlow, params.youngDark, params.bodyBright, params.coreDensity);
     mu.uIris.value.set(params.warmWobble, params.paletteJitter, Math.max(1e-3, params.youngFade), params.cooling);
     mu.uWarmSel.value.set(params.warmLo, Math.max(params.warmLo + 1e-3, params.warmHi), params.rim, 0);
-    mu.uEdge.value.set(Math.max(0.5, params.edgeFade), Math.max(0.5, params.edgeFadeTop));
+    mu.uEdge.value.set(Math.max(0.5, params.edgeFade), Math.max(0.5, params.edgeFadeTop), Math.max(1e-3, params.edgeFadeZ));
+    mu.uLit.value.set(params.lightRamp, Math.min(Math.max(params.shadowDark, 0), 1), params.lightMid, Math.max(0, params.detailFine));
+    mu.uBands.value.set(Math.max(0, Math.round(params.bands)), Math.min(Math.max(params.bandSoft, 0.02), 0.5));
+    mu.uDensity.value.set(Math.max(1e-3, params.densityKnee), Math.min(Math.max(params.densityContrast, 0), 1), Math.min(Math.max(params.densitySoft, 0.05), 1));
+    mu.uHeight.value.set(params.heightLo, Math.max(params.heightLo + 1e-3, params.heightHi), Math.min(Math.max(params.heightMix, 0), 1), params.heightWobble);
+    mu.uRimWarm.value = Math.min(Math.max(params.rimWarm, 0), 1);
+    mu.uFan.value.set(params.fanX, params.fanLo, Math.max(params.fanLo + 1e-3, params.fanHi), Math.max(0, params.fanBack));
+    mu.uFanFront.value = Math.max(0, params.fanFront);
+    mu.uMapAge.value = Math.min(Math.max(params.mapAge, 0), 1);
+    mu.uMapBust.value = Math.max(0, params.mapBustSoft);
+    mu.uRimGlow.value = Math.max(0, params.rimGlow);
+    mu.uMapAlpha.value.set(Math.max(0, params.mapAlphaLo), Math.max(params.mapAlphaLo + 1e-3, params.mapAlphaHi));
+    mu.uMap.value.set(Math.min(Math.max(params.gradientMap, 0), 1), Math.max(1e-4, params.mapFuel), Math.max(1e-4, params.mapRim), Math.min(Math.max(params.mapHeight, 0), 1));
     mu.uDebug.value = params.debug | 0;
     const cu = compositeMaterial.uniforms;
     cu.uDepth.value = depthTexture || null;
@@ -576,6 +775,7 @@ export function createFire(renderer, options = {}) {
     cu.uDepthSize.value.copy(mu.uDepthSize.value);
     compositeMaterial.uniforms.uExposure.value = params.exposure;
     compositeMaterial.uniforms.uShoulder.value = Math.min(0.98, Math.max(0.1, params.shoulder));
+    compositeMaterial.uniforms.uSpill.value = Math.max(0, params.whiteSpill);
     compositeMaterial.uniforms.uRaw.value = params.debug ? 1 : 0;
 
     saveState();
@@ -613,11 +813,13 @@ export function createFire(renderer, options = {}) {
     renderer.setClearColor(clearColor, alpha);
     renderer.autoClear = autoClear;
     time = 0;
+    obsPrevOk.fill(false);
+    scalpPrevOk = false;
   }
 
   function dispose() {
     for (const rt of [...simTargets(), fireRT]) rt.dispose();
-    for (const m of [mAdvectVel, mCurl, mConfine, mDivergence, mRestrict, mJacobiCoarse, mProlong, mJacobi, mGradient, mAdvectScal, mColumns, mDilate, mMarch, compositeMaterial]) m.dispose();
+    for (const m of [mAdvectVel, mCurl, mConfine, mDivergence, mRestrict, mJacobiCoarse, mProlong, mJacobi, mGradient, mAdvectPre, mAdvectScal, mColumns, mDilate, mMarch, compositeMaterial]) m.dispose();
     passGeometry.dispose();
     compositeGeometry.dispose();
     noiseTex.dispose();
@@ -640,6 +842,8 @@ export function createFire(renderer, options = {}) {
     info: { grid: [NX, NY, NZ], tiles: [TX, TY], atlas: [AW, AH], coarseGrid: [CNX, CNY, CNZ], cell: cell.toArray(), quality },
     /** Lab profiling hook: fn(passName) runs before every draw (null to remove). */
     _setPassHook(fn) { passHook = fn || null; },
+    /** Lab debug: the frame the emitter cap is tested in (world -> unit sphere), see capFollow. */
+    get _scalpCap() { return U.uScalpCap.value; },
     // internals for the lab's debug views
     _targets: { get scalars() { return scalA; }, get velocity() { return velA; }, get columns() { return colRT; }, get fire() { return fireRT; } },
   };

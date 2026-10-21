@@ -1,13 +1,19 @@
 /**
- * lab.js — tools/fire-lab.html: the fluid fire on a provisional head.
+ * lab.js — tools/fire-lab.html: the fluid fire on the real avatar.
  *
  * Ortho camera over the whole backdrop (world X 0..1.648, Y 0..1, contain fit), a backdrop
- * that approximates the reference (or the reference itself, ?bg=ref), the head as three navy
- * ellipsoids lit by the fire (through fire.sampling) that also write a DepthTexture for the
- * fire's occlusion, a scripted head animation (nod, bob, a 35 degree turn towards the viewer
- * every 10 s) and a scripted pointer sweep through the flames.
+ * that approximates the reference (or the reference itself, ?bg=ref), the avatar's skinned mesh
+ * (src/avatar/, read-only use: lit by the fire through fire.sampling, and its depth pass feeds
+ * the fire's occlusion exactly like src/scene.js), a scripted life like the page's (breath,
+ * bob, sway, a glance towards the viewer driven by the page's critically damped spring) and a
+ * scripted pointer sweep through the flames. The fire starts from the page's config.fireParams
+ * (?pageparams=0: the module's DEFAULT_PARAMS).
  *
- * window.__fireLab = { step(n), render(), capture(name), setParam(k, v), timings(n), ... }
+ * Script (lab time, s): first glance at 9 (hold 4, then back), every 12 s; pointer sweep at 16.5,
+ * every 12 s. Handy capture times: rest 8.9, mid-turn 9.7, turn hold 11.0 / 12.5, sweep 17.3.
+ *
+ * window.__fireLab = { step(n), stepTo(t), render(), capture(name), shots(prefix, times),
+ *                      setParam(k, v), timings(n), pose(yaw, pitch), ... }
  * Stepping is deterministic: fixed dt (1/30 s), lab time drives every animation.
  * Debug views: setParam('debug', 1 | 2 | 3) = raw fuel, fuel age, tongue phase (warm/cool).
  * timings(n) is async and advances the simulation by 2n frames.
@@ -15,35 +21,37 @@
 
 import * as THREE from 'three';
 import { createFire } from './fire.js';
+import { config } from '../config.js';
+import { createNoiseTexture } from '../noise.js';
+import { loadAvatarBuffer, createAvatar } from '../avatar/avatar.js';
 
 const qs = new URLSearchParams(location.search);
 const TAU = Math.PI * 2;
 const IMG_W = 1383 / 839; // backdrop width in world units (image heights)
 const DT = 1 / 30;
-const BOUNDS_MIN = new THREE.Vector3(0.08, 0.30, -0.36);
-const BOUNDS_MAX = new THREE.Vector3(1.45, 1.06, 0.36);
-const PIVOT = new THREE.Vector3(0.73, 0.40, 0.0);
-const PARTS = [
-  { name: 'cranium', c: new THREE.Vector3(0.84, 0.64, 0.0), r: new THREE.Vector3(0.33, 0.30, 0.25), follow: 1.0 },
-  { name: 'face', c: new THREE.Vector3(1.05, 0.44, 0.0), r: new THREE.Vector3(0.16, 0.24, 0.18), follow: 1.0 },
-  { name: 'neck', c: new THREE.Vector3(0.68, 0.18, 0.0), r: new THREE.Vector3(0.15, 0.25, 0.13), follow: 0.4 },
-];
-const CAP_DIR = new THREE.Vector3(-0.45, 0.89, 0.0).normalize();
-const CAP_COS = 0.15;
+const BOUNDS_MIN = new THREE.Vector3(...config.fireBox.min);
+const BOUNDS_MAX = new THREE.Vector3(...config.fireBox.max);
+if (qs.get('boxz')) {   // ?boxz=-0.36,0.5: try another depth range for the box
+  const [z0, z1] = qs.get('boxz').split(',').map(Number);
+  if (Number.isFinite(z0) && Number.isFinite(z1) && z1 > z0) { BOUNDS_MIN.z = z0; BOUNDS_MAX.z = z1; }
+}
 // reference2 pixel (x2, y2) -> world ((x2 / 1.388 - 39) / 839, 1 - (y2 / 1.388) / 839)
 const REF = { k: 1.388, ox: 39, ih: 839 };
 
 const lab = {
-  motion: 1,        // nod + bob
-  turn: 1,          // the periodic turn towards the viewer
+  motion: 1,        // breath, bob, idle sway
+  turn: 1,          // the scripted glance towards the viewer
+  turnAmount: 1,    // 0..1 of the page's full glance (yaw ~0.5 rad)
   pointer: 1,       // scripted pointer sweeps
   intensity: 1,
-  occlusion: 1,     // pass the bust depth to the fire
-  headLight: 1,     // fire light on the head (through fire.sampling)
+  occlusion: 1,     // pass the avatar depth to the fire
   bg: qs.get('bg') || 'proc', // proc | ref | black
   refOpacity: 0.4,
   showHead: 1,
   showFire: 1,
+  showCap: 0,       // debug: the scalp ellipsoid coloured by the emitter cap (green in, red out)
+  yaw: null,        // manual pose override (radians), null = scripted
+  pitch: null,
 };
 
 // ------------------------------------------------------------------ renderer + camera
@@ -53,19 +61,22 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: fals
 renderer.setPixelRatio(1);
 const gl = renderer.getContext();
 
-const camera = new THREE.OrthographicCamera(0, IMG_W, 1, 0, 0.1, 10);
-camera.position.set(0, 0, 5);
+const camera = new THREE.OrthographicCamera(0, IMG_W, 1, 0, 0.5, 6);
+camera.position.set(0, 0, 3);
 
-const quality = qs.get('quality') || 'high';
-const grid = qs.get('grid') ? qs.get('grid').split('x').map(Number) : undefined;
-const fire = createFire(renderer, { boundsMin: BOUNDS_MIN, boundsMax: BOUNDS_MAX, grid, quality });
-
-const depthRT = new THREE.WebGLRenderTarget(2, 2, {
-  depthBuffer: true,
-  depthTexture: new THREE.DepthTexture(2, 2),
-  minFilter: THREE.NearestFilter,
-  magFilter: THREE.NearestFilter,
+const quality = qs.get('quality') || config.fireBox.quality || 'high';
+const grid = qs.get('grid') ? qs.get('grid').split('x').map(Number) : config.fireBox.grid;
+const usePageParams = qs.get('pageparams') !== '0';
+const fire = createFire(renderer, {
+  boundsMin: BOUNDS_MIN,
+  boundsMax: BOUNDS_MAX,
+  grid,
+  quality,
+  params: usePageParams ? config.fireParams : {},
 });
+
+const depthRT = new THREE.WebGLRenderTarget(2, 2, { depthBuffer: true, stencilBuffer: false });
+depthRT.depthTexture = new THREE.DepthTexture(2, 2);
 
 // ------------------------------------------------------------------ backdrop
 const bgMaterial = new THREE.RawShaderMaterial({
@@ -78,7 +89,6 @@ const bgMaterial = new THREE.RawShaderMaterial({
     uRefRect: { value: new THREE.Vector4(0, 0, 1, 1) },
     uRefOpacity: { value: 0 },
     uMode: { value: 0 },
-    uPointer: { value: new THREE.Vector4() },
     uImgW: { value: IMG_W },
   },
   vertexShader: /* glsl */ `
@@ -94,7 +104,6 @@ const bgMaterial = new THREE.RawShaderMaterial({
     uniform vec4 uRefRect;
     uniform float uRefOpacity;
     uniform int uMode;
-    uniform vec4 uPointer;
     uniform float uImgW;
     in vec2 vNdc;
     layout(location = 0) out vec4 fragColor;
@@ -136,48 +145,13 @@ new THREE.TextureLoader().load('/tools/reference2.webp', (tex) => {
   const H = tex.image.height / REF.k / REF.ih;
   bgMaterial.uniforms.uRef.value = tex;
   bgMaterial.uniforms.uRefRect.value.set(-REF.ox / REF.ih, 1 - H, W, H);
-  if (!running) drawFrame();
+  if (!running && avatar) drawFrame();
 });
 
-// ------------------------------------------------------------------ head (lit by the fire)
-const headMaterial = new THREE.ShaderMaterial({
-  uniforms: { ...fire.sampling.uniforms, uFireLight: { value: 1 } },
-  vertexShader: /* glsl */ `
-    varying vec3 vWorld;
-    varying vec3 vNormalW;
-    void main() {
-      vec4 wp = modelMatrix * vec4(position, 1.0);
-      vWorld = wp.xyz;
-      vNormalW = normalize(transpose(inverse(mat3(modelMatrix))) * normal);
-      gl_Position = projectionMatrix * viewMatrix * wp;
-    }
-  `,
-  fragmentShader: /* glsl */ `
-    ${fire.sampling.glsl}
-    uniform float uFireLight;
-    varying vec3 vWorld;
-    varying vec3 vNormalW;
-    void main() {
-      vec3 n = normalize(vNormalW);
-      vec3 navy = vec3(0.035, 0.045, 0.17);
-      float key = 0.55 + 0.45 * dot(n, normalize(vec3(0.55, 0.55, 0.65)));
-      float rim = pow(1.0 - abs(n.z), 3.0);
-      vec3 col = navy * key + vec3(0.04, 0.05, 0.22) * rim;
-      float h = fireHeatAt(vWorld + n * 0.035);
-      col += vec3(0.10, 0.20, 0.90) * h * 0.45 * uFireLight;
-      gl_FragColor = vec4(col, 1.0);
-    }
-  `,
-});
-const headScene = new THREE.Scene();
-const sphere = new THREE.SphereGeometry(1, 72, 48);
-const meshes = PARTS.map((part) => {
-  const m = new THREE.Mesh(sphere, headMaterial);
-  m.matrixAutoUpdate = false;
-  m.frustumCulled = false;
-  headScene.add(m);
-  return m;
-});
+// ------------------------------------------------------------------ the avatar (src/avatar/, read-only)
+const noise = createNoiseTexture();
+const world = new THREE.Scene();
+let avatar = null;
 
 const compScene = new THREE.Scene();
 compScene.add(fire.compositeMesh);
@@ -191,44 +165,83 @@ const pointerRing = new THREE.Mesh(
 pointerRing.position.z = 1;
 overlayScene.add(pointerRing);
 
-// ------------------------------------------------------------------ animation script
+// debug: the scalp ellipsoid, green where the emitter cap is (dot(dir, capDir) > capCos), red outside
+const capMaterial = new THREE.ShaderMaterial({
+  uniforms: { uCapDir: { value: new THREE.Vector3(0, 1, 0) }, uCapCos: { value: 0 } },
+  vertexShader: /* glsl */ `
+    varying vec3 vDir;
+    void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform vec3 uCapDir;
+    uniform float uCapCos;
+    varying vec3 vDir;
+    void main() {
+      float c = dot(normalize(vDir), uCapDir);
+      vec3 col = c > uCapCos ? vec3(0.1, 0.8, 0.2) : vec3(0.8, 0.1, 0.1);
+      col *= 0.6 + 0.4 * smoothstep(0.0, 0.05, abs(c - uCapCos));
+      gl_FragColor = vec4(col, 0.6);
+    }
+  `,
+  transparent: true,
+  depthTest: false,
+  depthWrite: false,
+});
+const capMesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 32), capMaterial);
+capMesh.matrixAutoUpdate = false;
+capMesh.frustumCulled = false;
+const capScene = new THREE.Scene();
+capScene.add(capMesh);
+
+// ------------------------------------------------------------------ life script (like src/signals.js + src/main.js)
 const ease = (x) => { x = Math.min(Math.max(x, 0), 1); return x * x * x * (x * (x * 6 - 15) + 10); };
-
-/** 0..1: how far the head is turned towards the viewer. First turn at 9 s, every 10 s. */
-function turnEnvelope(t) {
-  const P = 10;
-  const u = (((t - 9) % P) + P) % P;
-  if (t < 9) return 0;
-  if (u < 1.3) return ease(u / 1.3);
-  if (u < 3.3) return 1;
-  if (u < 5.0) return 1 - ease((u - 3.3) / 1.7);
-  return 0;
+const sway = (t, a, b, c) => (Math.sin(t * a) + 0.6 * Math.sin(t * b + 1.7) + 0.35 * Math.sin(t * c + 0.4)) / 1.95;
+function springTo(state, target, omega, dt) {
+  const x = state.x - target;
+  const v = state.v;
+  const e = Math.exp(-omega * dt);
+  const c2 = v + omega * x;
+  state.x = target + (x + c2 * dt) * e;
+  state.v = (v - c2 * omega * dt) * e;
+  return state.x;
 }
 
-const m1 = new THREE.Matrix4();
-const m2 = new THREE.Matrix4();
-/** Head transform (local bind pose -> world) at time t; k scales the rotations (neck follows less). */
-function headPose(t, k, out) {
-  const nod = lab.motion * (0.05 * Math.sin((t * TAU) / 5.3) + 0.022 * Math.sin((t * TAU) / 2.9 + 1.0));
-  const bob = lab.motion * 0.007 * Math.sin((t * TAU) / 3.7 + 0.4);
-  const yaw = -lab.turn * THREE.MathUtils.degToRad(35) * turnEnvelope(t);
-  out.makeTranslation(-PIVOT.x, -PIVOT.y, -PIVOT.z);
-  m2.makeRotationZ(nod * k);
-  out.premultiply(m2);
-  m2.makeRotationY(yaw * k);
-  out.premultiply(m2);
-  m1.makeTranslation(PIVOT.x, PIVOT.y + bob, PIVOT.z);
-  return out.premultiply(m1);
+const GLANCE = { first: 9, period: 12, hold: 4 };
+/** Is the glance target on at lab time t? */
+function glanceOn(t) {
+  if (!lab.turn || t < GLANCE.first) return false;
+  return ((t - GLANCE.first) % GLANCE.period) < GLANCE.hold;
 }
 
-/** Scripted pointer: a sweep over the head through the flames, at 7.5 s and every 10 s. */
+const turnS = { x: 0, v: 0 };
+const pitchS = { x: 0, v: 0 };
+const poseState = { yaw: 0, pitch: 0, breath: 0, bobX: 0, bobY: 0 };
+/** Advance the life signals to time t (after a step of dt) and fill poseState like main.js does. */
+function lifeAt(t, dt) {
+  const on = glanceOn(t);
+  const turn = springTo(turnS, on ? lab.turnAmount : 0, on ? 2.6 : 1.7, dt);
+  const lookPitch = springTo(pitchS, on ? 0.05 : 0, on ? 2.2 : 1.6, dt);
+  const m = lab.motion;
+  const yawSway = 0.07 * sway(t, 0.23, 0.41, 0.77) * m;
+  const pitchSway = 0.035 * sway(t + 11.0, 0.19, 0.47, 0.83) * m;
+  const headYaw = turn * 0.88 + yawSway;          // signals.js TURN_YAW
+  const headPitch = lookPitch + pitchSway;
+  const s = Math.sin(TAU * t / 4.8);
+  poseState.yaw = lab.yaw ?? headYaw * 0.82;
+  poseState.pitch = lab.pitch ?? headPitch + turn * 0.06;
+  poseState.breath = s * Math.pow(Math.abs(s), 0.2) * (0.4 + 0.6 * m);
+  poseState.bobX = 0.005 * sway(t + 3.0, 0.17, 0.29, 0.61) * IMG_W * m;
+  poseState.bobY = -0.009 * sway(t + 7.0, 0.21, 0.37, 0.69) * m;
+  poseState.turn = turn;
+  return poseState;
+}
+
+/** Scripted pointer: a sweep over the head through the flames, at 16.5 s and every 12 s. */
+const SWEEP = { first: 16.5, period: 12, dur: 1.6 };
 function pointerAt(t, out) {
   out.active = false;
-  if (!lab.pointer) return out;
-  const P = 10;
-  const dur = 1.6;
-  if (t < 7.5) return out;
-  const u = ((t - 7.5) % P) / dur;
+  if (!lab.pointer || t < SWEEP.first) return out;
+  const u = ((t - SWEEP.first) % SWEEP.period) / SWEEP.dur;
   if (u > 1) return out;
   const s = ease(u);
   out.x = 0.20 + (1.32 - 0.20) * s;
@@ -237,48 +250,18 @@ function pointerAt(t, out) {
   return out;
 }
 
-const partLocal = PARTS.map((p) => new THREE.Matrix4().compose(p.c, new THREE.Quaternion(), p.r));
-const pose = PARTS.map(() => new THREE.Matrix4());
-const posePrev = PARTS.map(() => new THREE.Matrix4());
-const obstacleMats = PARTS.map(() => new THREE.Matrix4());
-const obstacleVel = PARTS.map(() => new THREE.Vector3());
-const cNow = new THREE.Vector3();
-const cPrev = new THREE.Vector3();
 const ptr = { x: 0, y: 0, vx: 0, vy: 0, active: false };
 const ptrPrev = { x: 0, y: 0, active: false };
-const frame = {
-  obstacles: obstacleMats,
-  obstacleVelocity: obstacleVel,
-  scalp: obstacleMats[0],
-  scalpCapDir: CAP_DIR,
-  scalpCapCos: CAP_COS,
-  pointer: ptr,
-  intensity: 1,
-};
 
 let labTime = 0;
 let frames = 0;
 
-function poseAt(t, out) {
-  PARTS.forEach((p, i) => headPose(t, p.follow, out[i]).multiply(partLocal[i]));
-}
-
-function applyPose() {
-  poseAt(labTime, pose);
-  meshes.forEach((m, i) => { m.matrix.copy(pose[i]); m.matrixWorld.copy(pose[i]); });
-}
-
 function advance(dt) {
+  if (!avatar) return;
   const t0 = labTime;
   const t1 = labTime + dt;
-  poseAt(t0, posePrev);
-  poseAt(t1, pose);
-  for (let i = 0; i < PARTS.length; i++) {
-    obstacleMats[i].copy(pose[i]).invert();
-    cNow.setFromMatrixPosition(pose[i]);
-    cPrev.setFromMatrixPosition(posePrev[i]);
-    obstacleVel[i].subVectors(cNow, cPrev).divideScalar(dt);
-  }
+  avatar.setPose(lifeAt(t1, dt));
+  const frame = avatar.fireFrame(dt);
   pointerAt(t0, ptrPrev);
   pointerAt(t1, ptr);
   if (ptr.active && ptrPrev.active) {
@@ -288,6 +271,7 @@ function advance(dt) {
     ptr.vx = 0;
     ptr.vy = 0;
   }
+  Object.assign(frame.pointer, ptr);
   frame.intensity = lab.intensity;
   fire.step(dt, frame);
   labTime = t1;
@@ -314,23 +298,33 @@ function layout() {
   bgMaterial.uniforms.uView.value.set(camera.left, camera.bottom, vw, vh);
   depthRT.setSize(w, h);
   fire.setSize(w, h);
+  if (avatar) {
+    const periodPx = Math.min(18, Math.max(9, 11 * s / 839));
+    avatar.uniforms.uLineFreq.value = s / periodPx;
+  }
 }
 
 function drawFrame() {
-  applyPose();
+  if (!avatar) return;
   const debugView = fire.params.debug > 0;
   bgMaterial.uniforms.uMode.value = debugView || lab.bg === 'black' ? 2 : lab.bg === 'ref' ? 1 : 0;
   bgMaterial.uniforms.uRefOpacity.value = lab.refOpacity;
-  bgMaterial.uniforms.uPointer.value.set(ptr.x, ptr.y, ptr.active ? 1 : 0, 0);
-  headMaterial.uniforms.uFireLight.value = lab.headLight;
+  avatar.uniforms.uTime.value = labTime;
+  const la = labTime * 0.1;
+  avatar.uniforms.uKeyDir.value.set(Math.cos(la) * 0.7, 0.35 + Math.sin(la) * 0.45, 0.7).normalize();
 
-  renderer.autoClear = true;
-  renderer.setRenderTarget(depthRT);
-  renderer.render(headScene, camera);
-  renderer.setRenderTarget(null);
-  renderer.render(bgScene, camera);
+  // the avatar's depth, so the fire stops at his skin (as in src/scene.js)
   renderer.autoClear = false;
-  if (lab.showHead && !debugView) renderer.render(headScene, camera);
+  renderer.setRenderTarget(depthRT);
+  renderer.clear(true, true, false);
+  avatar.mesh.material = avatar.depthMaterial;
+  renderer.render(world, camera);
+  avatar.mesh.material = avatar.material;
+
+  renderer.setRenderTarget(null);
+  renderer.clear(true, true, false);
+  renderer.render(bgScene, camera);
+  if (lab.showHead && !debugView) renderer.render(world, camera);
   if (lab.showFire) {
     fire.render(camera, lab.occlusion ? depthRT.depthTexture : null, { near: camera.near, far: camera.far });
     renderer.render(compScene, camera);
@@ -338,6 +332,14 @@ function drawFrame() {
   pointerRing.visible = ptr.active && !debugView;
   pointerRing.position.x = ptr.x;
   pointerRing.position.y = ptr.y;
+  if (lab.showCap) {
+    const f = avatar.frame;
+    capMesh.matrix.copy(fire._scalpCap || f.scalp).invert();
+    capMesh.matrixWorld.copy(capMesh.matrix);
+    capMaterial.uniforms.uCapDir.value.copy(f.scalpCapDir);
+    capMaterial.uniforms.uCapCos.value = f.scalpCapCos;
+    renderer.render(capScene, camera);
+  }
   renderer.render(overlayScene, camera);
   renderer.autoClear = true;
 }
@@ -350,7 +352,7 @@ function tick(now) {
   requestAnimationFrame(tick);
   const dt = Math.min((now - last) / 1000, 1 / 20);
   last = now;
-  if (!running) return;
+  if (!running || !avatar) return;
   fps = fps * 0.9 + (dt > 0 ? 1 / dt : 0) * 0.1;
   advance(dt);
   drawFrame();
@@ -358,8 +360,10 @@ function tick(now) {
 }
 
 function updateHud(extra = '') {
-  hud.textContent = `fire lab  t ${labTime.toFixed(2)} s  frame ${frames}  ${running ? `${fps.toFixed(0)} fps` : 'paused'}\n`
+  hud.textContent = `fire lab  t ${labTime.toFixed(2)} s  frame ${frames}  ${running ? `${fps.toFixed(0)} fps` : 'paused'}`
+    + `  yaw ${poseState.yaw.toFixed(2)}\n`
     + `grid ${fire.info.grid.join('x')} (atlas ${fire.info.atlas.join('x')})  canvas ${size.join('x')}  quality ${quality}`
+    + `  params ${usePageParams ? 'page' : 'module defaults'}`
     + (extra ? `\n${extra}` : '');
 }
 
@@ -433,13 +437,46 @@ async function gpuProfile(n) {
   return { step: +step.toFixed(3), render: +render.toFixed(3), passes };
 }
 
+function resetLab() {
+  fire.reset();
+  labTime = 0;
+  frames = 0;
+  turnS.x = turnS.v = pitchS.x = pitchS.v = 0;
+  if (avatar) {
+    avatar.setPose(lifeAt(0, 0));
+    avatar.fireFrame(0);   // re-prime the obstacle velocities at the rest pose
+  }
+}
+
+async function capture(name = 'fire', type = 'jpeg') {
+  drawFrame();
+  const url = canvas.toDataURL(type === 'png' ? 'image/png' : 'image/jpeg', 0.92);
+  const res = await fetch(`http://localhost:5199/save?name=${encodeURIComponent(name)}`, { method: 'POST', body: url });
+  return res.text();
+}
+
+const ready = loadAvatarBuffer().then((buffer) => {
+  avatar = createAvatar(buffer, { noise, fireSampling: fire.sampling });
+  avatar.uniforms.uReveal.value = 1;
+  world.add(avatar.mesh);
+  avatar.setPose();
+  avatar.fireFrame(0);
+  layout();
+  drawFrame();
+  updateHud();
+  return true;
+});
+
 window.__fireLab = {
   fire,
   renderer,
   camera,
   lab,
+  ready,
+  get avatar() { return avatar; },
   get time() { return labTime; },
   get frames() { return frames; },
+  get pose() { return { ...poseState }; },
   /** Advance n frames of fixed dt (1/30 s) without drawing; pauses the live loop. */
   step(n = 1, dt = DT) {
     running = false;
@@ -448,19 +485,39 @@ window.__fireLab = {
     updateHud();
     return { time: labTime, frames };
   },
+  /** Step (fixed dt) until lab time t. */
+  stepTo(t, dt = DT) {
+    running = false;
+    while (labTime < t - 1e-6) advance(dt);
+    drawFrame();
+    updateHud();
+    return { time: labTime, frames, yaw: poseState.yaw };
+  },
   render() { drawFrame(); return { time: labTime, frames }; },
   play() { running = true; last = performance.now(); },
   pause() { running = false; },
   /** Clears the fluid and rewinds the lab clock (deterministic restarts). */
-  reset() { fire.reset(); labTime = 0; frames = 0; drawFrame(); updateHud(); },
+  reset() { resetLab(); drawFrame(); updateHud(); },
   /** Renders, then posts the canvas to the capture server; resolves to the written path. */
-  async capture(name = 'fire', type = 'jpeg') {
-    drawFrame();
-    const url = canvas.toDataURL(type === 'png' ? 'image/png' : 'image/jpeg', 0.9);
-    const res = await fetch(`http://localhost:5199/save?name=${encodeURIComponent(name)}`, { method: 'POST', body: url });
-    return res.text();
+  capture,
+  /**
+   * Deterministic capture series: reset, then step to each time and capture `${prefix}_${label}`.
+   * shots('v1') uses the default times: rest 8.9, mid 9.7, hold 11.0, hold2 12.5, sweep 17.3.
+   */
+  async shots(prefix = 'shot', times = { rest: 8.9, mid: 9.7, hold: 11.0, hold2: 12.5, sweep: 17.3 }) {
+    running = false;
+    resetLab();
+    const out = {};
+    for (const [label, t] of Object.entries(times).sort((a, b) => a[1] - b[1])) {
+      while (labTime < t - 1e-6) advance(DT);
+      out[label] = await capture(`${prefix}_${label}`);
+    }
+    updateHud();
+    return out;
   },
-  /** Fire params by name; lab switches: motion, turn, pointer, intensity, occlusion, headLight, bg, refOpacity, showHead. */
+  /** Manual pose (radians); pose(null) hands the head back to the script. */
+  pose(yaw = null, pitch = null) { lab.yaw = yaw; lab.pitch = pitch; return { yaw, pitch }; },
+  /** Fire params by name; lab switches: motion, turn, turnAmount, pointer, intensity, occlusion, bg, refOpacity, showHead, showFire. */
   setParam(k, v) {
     if (k in lab) lab[k] = v;
     else if (k in fire.params) {
@@ -470,6 +527,7 @@ window.__fireLab = {
     if (!running) drawFrame();
     return v;
   },
+  setParams(obj) { for (const [k, v] of Object.entries(obj)) this.setParam(k, v); return this.params(); },
   params() { return { ...fire.params, lab: { ...lab } }; },
   setSize(w, h) { forced = [w, h]; layout(); if (!running) drawFrame(); return size; },
   /**
@@ -522,6 +580,5 @@ window.__fireLab = {
 
 window.addEventListener('resize', () => { if (!forced) { layout(); if (!running) drawFrame(); } });
 layout();
-drawFrame();
 updateHud();
 requestAnimationFrame(tick);

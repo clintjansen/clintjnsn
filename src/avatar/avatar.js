@@ -118,6 +118,7 @@ export function createAvatar(buffer, { noise, fireSampling = null }) {
   chest.position.fromArray(P.chest);
   neck.position.set(P.neck[0] - P.chest[0], P.neck[1] - P.chest[1], P.neck[2] - P.chest[2]);
   head.position.set(P.head[0] - P.neck[0], P.head[1] - P.neck[1], P.head[2] - P.neck[2]);
+  chest.rotation.order = 'YZX';
   neck.rotation.order = 'YZX';
   head.rotation.order = 'YZX';
   chest.add(neck);
@@ -167,13 +168,16 @@ export function createAvatar(buffer, { noise, fireSampling = null }) {
    * Pose the rig. All angles in radians.
    *   yaw    0 = profile (rest), > 0 turns his face towards the viewer
    *   pitch  > 0 lifts the chin, < 0 nods down
+   *   roll   > 0 tilts the top of the head towards the viewer (about the line of his nose)
    *   breath -1..1, bob {x, y} in world units
+   * The turn is shared down the spine: the shoulders follow a little, the neck twists, the head
+   * does the rest; the skull, face and jaw turn as one (see the skin weights in the builder).
    */
-  function setPose({ yaw = 0, pitch = 0, breath = 0, bobX = 0, bobY = 0 } = {}) {
+  function setPose({ yaw = 0, pitch = 0, roll = 0, breath = 0, bobX = 0, bobY = 0 } = {}) {
     chest.position.set(P.chest[0] + bobX * 0.6, P.chest[1] + bobY * 0.6 + 0.004 * breath, P.chest[2]);
-    chest.rotation.set(0, 0, 0.010 * breath);
-    neck.rotation.set(0, -yaw * 0.38, pitch * 0.35 - 0.012 * breath);
-    head.rotation.set(0, -yaw * 0.62, pitch * 0.65 + 0.006 * breath);
+    chest.rotation.set(0, -yaw * 0.06, 0.010 * breath);
+    neck.rotation.set(roll * 0.35, -yaw * 0.34, pitch * 0.35 - 0.012 * breath);
+    head.rotation.set(roll * 0.65, -yaw * 0.60, pitch * 0.65 + 0.006 * breath);
     // the head carries a little more of the bob than the chest: it floats
     head.position.set(P.head[0] - P.neck[0] + bobX * 0.4, P.head[1] - P.neck[1] + bobY * 0.4, 0);
     mesh.updateMatrixWorld(true);

@@ -41,7 +41,7 @@ let signals = createSignals({ seed: 7 });
 let loop = null;
 let cardShown = false;
 let motion = 1;          // 0 under prefers-reduced-motion: no bob / glance / wave
-const pose = { yaw: 0, pitch: 0, breath: 0, bobX: 0, bobY: 0 };
+const pose = { yaw: 0, pitch: 0, roll: 0, breath: 0, bobX: 0, bobY: 0 };
 const firePointer = { x: -10, y: -10, vx: 0, vy: 0, active: false };
 
 // The fox: where its nose is (image uv), its head rig, mood, and glow pulse phase.
@@ -274,8 +274,9 @@ function frame(dt, elapsed, now) {
   u.uPointerOn.value = pointer.current.active ? 1 : 0;
 
   // ---- the avatar's rig: glance spring + idle sway, breathing, bob (nothing under reduced motion)
-  pose.yaw = signals.headYaw * 0.8 * motion;                 // > 0 turns his face to the viewer
-  pose.pitch = (signals.headPitch + signals.turn * 0.10) * motion;   // lifts the chin as he looks up
+  pose.yaw = signals.headYaw * 0.82 * motion;                // > 0 turns his face to the viewer
+  pose.pitch = (signals.headPitch + signals.turn * 0.06) * motion;   // lifts the chin as he looks up
+  pose.roll = signals.headRoll * motion;
   pose.breath = signals.breath * (0.4 + 0.6 * motion);
   pose.bobX = signals.bob.x * aspect * motion;
   pose.bobY = -signals.bob.y * motion;

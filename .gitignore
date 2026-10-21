@@ -11,3 +11,4 @@ __pycache__/
 !.env.example
 tools/avatar_lab
 wip/
+tools/avatar/work

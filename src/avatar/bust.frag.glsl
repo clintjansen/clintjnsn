@@ -1,5 +1,5 @@
 // The avatar's skin, in the painting's language (see tools/reference2.webp, face and neck):
-//   - near-black navy covered in short, combed, slightly raised strokes, in patches that run
+//   - dark teal-navy covered in long, combed, slightly raised strokes, in patches that run
 //     in different directions (like brushed fur / fingerprint ridges)
 //   - a smooth, glossy ultramarine zone behind the neck where the lava throws hot glints
 //   - lit from above by his own fire (blue, cyan-white where it burns close), rimmed by the lava
@@ -36,14 +36,24 @@ vec2 strokes(vec2 q, float ang, float seed) {
   const float SP = 150.0;                       // strokes per world unit (~ the painting's spacing)
   vec2 d = vec2(cos(ang), sin(ang));
   vec2 nn = vec2(-d.y, d.x);
-  float ph = dot(q, nn) * SP + (fbm(q * 5.0 + seed) - 0.5) * 3.2;
+  float ph = dot(q, nn) * SP + (fbm(q * 3.0 + seed) - 0.5) * 4.0;
   float lane = floor(ph);
   float f = fract(ph);
-  float along = dot(q, d) * SP * 0.15 + hash1(lane + seed * 13.0) * 9.0;
+  // long ridges with the odd break (the painting's combed strokes run on like fingerprint ridges)
+  float along = dot(q, d) * SP * 0.045 + hash1(lane + seed * 13.0) * 9.0;
   float da = fract(along);
-  float dash = smoothstep(0.08, 0.30, da) * (1.0 - smoothstep(0.62, 0.86, da));
+  float dash = smoothstep(0.03, 0.16, da) * (1.0 - smoothstep(0.76, 0.94, da));
   float prof = sin(f * 3.14159);                // a rounded ridge across the stroke
   return vec2(prof * prof * dash, cos(f * 3.14159) * dash);
+}
+
+// The painting's two crossing combs at q (patches of one direction or the other). fw is the pixel
+// footprint of one stroke spacing, measured outside any branch: the strokes fade before they alias.
+vec2 combed(vec2 q, float seed, float fw) {
+  float patchN = fbm(q * 3.2 + 4.0 + seed);
+  vec2 sA = strokes(q, 1.15 + (fbm(q * 1.6 + seed) - 0.5) * 0.9, 1.0 + seed);          // steep diagonal
+  vec2 sB = strokes(q, 2.15 + (fbm(q * 1.6 + 3.0 + seed) - 0.5) * 0.9, 7.0 + seed);    // the other way
+  return mix(sA, sB, smoothstep(0.42, 0.62, patchN)) * (1.0 - smoothstep(0.35, 0.8, fw));
 }
 
 void main() {
@@ -61,18 +71,24 @@ void main() {
   // ---- where the skin is combed and where it is smooth and glossy (behind the neck)
   vec2 q = vObj.xy;
   float smoothZone = smoothstep(0.10, -0.14, vObj.x - 0.54 + (vObj.y - 0.25) * 0.35) * smoothstep(0.10, -0.10, vObj.y - 0.40);
-  float facing = smoothstep(0.25, 0.60, abs(normalize(vObjN).z));
-  float strokeAmt = (1.0 - smoothZone) * facing * (0.70 + 0.30 * fbm(q * 2.0 + 9.0));
+  float strokeAmt = (1.0 - smoothZone) * (0.70 + 0.30 * fbm(q * 2.0 + 9.0));
 
-  // two stroke directions, mixed in patches (the painting's crossing combs)
-  float patchN = fbm(q * 3.2 + 4.0);
-  vec2 sA = strokes(q, 1.15 + (fbm(q * 1.6) - 0.5) * 0.9, 1.0);   // steep diagonal
-  vec2 sB = strokes(q, 2.15 + (fbm(q * 1.6 + 3.0) - 0.5) * 0.9, 7.0);   // the other way
-  float mixB = smoothstep(0.42, 0.62, patchN);
-  vec2 s = mix(sA, sB, mixB) * strokeAmt;
-  // fade the strokes before they alias (pixel footprint of one stroke spacing)
-  float fw = length(fwidth(q)) * 150.0;
-  s *= 1.0 - smoothstep(0.35, 0.8, fw);
+  // The strokes are laid in the plane the rest-pose skin faces most (triplanar): the painting's own
+  // plane (XY) on the side of the face and the neck, YZ on the face front (which turns to the viewer
+  // on a glance), XZ under the jaw and on the crown; blended where the planes meet.
+  vec3 an = abs(normalize(vObjN));
+  vec3 tw = an * an * an * an;
+  tw /= tw.x + tw.y + tw.z;
+  vec2 qx = vec2(-vObj.z, vObj.y) + vec2(3.7, 0.0);
+  vec2 qy = vObj.xz + vec2(0.0, 5.3);
+  float fwz = length(fwidth(q)) * 150.0;
+  float fwx = length(fwidth(qx)) * 150.0;
+  float fwy = length(fwidth(qy)) * 150.0;
+  vec2 s = vec2(0.0);
+  if (tw.z > 0.02) s += combed(q, 0.0, fwz) * tw.z;
+  if (tw.x > 0.02) s += combed(qx, 11.0, fwx) * tw.x;
+  if (tw.y > 0.02) s += combed(qy, 23.0, fwy) * tw.y;
+  s *= strokeAmt;
 
   // ---- the fire's light: from above, its strength sampled from the live simulation
   float heat;
@@ -86,17 +102,20 @@ void main() {
   float kKey = max(dot(n, uKeyDir), 0.0);
   float fres = pow(1.0 - max(n.z, 0.0), 2.6);
 
-  // ---- albedo: near-black navy; the strokes are raised (dark grooves, a lit flank)
-  vec3 deep = vec3(0.028, 0.034, 0.120);
-  vec3 navy = vec3(0.060, 0.072, 0.300);
+  // ---- albedo: dark teal-navy; the strokes are raised (dark grooves, a light ridge, a lit flank)
+  // measured on the painting's face and neck: a dark teal-navy (median ~ 0.055, 0.095, 0.18),
+  // its strokes light blue-grey (~ 0.12, 0.15, 0.25) over dark grooves (~ 0.02, 0.055, 0.13)
+  vec3 deep = vec3(0.040, 0.080, 0.165);
+  vec3 navy = vec3(0.060, 0.100, 0.260);
   float topLift = smoothstep(0.40, 0.98, vWorld.y) * (0.35 + 0.65 * kFire);
   vec3 albedo = mix(deep, navy, clamp(topLift + kKey * 0.30, 0.0, 1.0));
   // the glossy zone is a richer ultramarine
   vec3 gloss0 = mix(vec3(0.05, 0.05, 0.30), vec3(0.16, 0.10, 0.70), clamp(0.35 + 0.65 * kFire, 0.0, 1.0));
   gloss0 = mix(gloss0, vec3(0.30, 0.10, 0.62), smoothstep(0.5, 0.9, fbm(q * 2.2 + 3.0)) * 0.45);
   albedo = mix(albedo, gloss0, smoothZone * 0.85);
-  albedo *= 1.0 - 0.42 * (1.0 - s.x) * strokeAmt;               // grooves between strokes
-  albedo += vec3(0.07, 0.09, 0.34) * max(s.y, 0.0) * 0.55 * (0.5 + 0.5 * kFire + 0.4 * kKey);
+  albedo *= 1.0 - 0.45 * (1.0 - s.x) * strokeAmt;               // grooves between strokes
+  albedo += vec3(0.060, 0.065, 0.095) * s.x * strokeAmt;          // the painted strokes themselves: light blue-grey
+  albedo += vec3(0.06, 0.08, 0.22) * max(s.y, 0.0) * 0.55 * (0.5 + 0.5 * kFire + 0.4 * kKey);
 
   // a dim maroon warmth at the cheek (the lava glowing through)
   float cheek = exp(-dot(vObj.xy - vec2(0.76, 0.41), vObj.xy - vec2(0.76, 0.41)) * 140.0);

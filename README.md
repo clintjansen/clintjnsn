@@ -44,7 +44,8 @@ The fire also has a standalone lab: `http://localhost:5173/tools/fire-lab.html`
 ```
 tools/reference2.webp       the avatar reference (what the avatar and the fire are matched to)
 tools/reference.webp        the backdrop reference (plates for the lava and pale area)
-tools/build_avatar.py       builds the avatar mesh from reference2 (python, see below)
+tools/avatar/               builds the avatar mesh from reference2 (python, see below)
+tools/build_avatar.py       runs tools/avatar/build.py (the old entry point)
 tools/prepare.py            builds the backdrop plates from reference (python, see below)
 src/
   main.js                   boot + state machine (loading -> hold -> reveal -> live), behaviour, HUD
@@ -78,32 +79,46 @@ paintings' lava).
 
 ### The avatar
 
-- **Shape** (`tools/build_avatar.py`): the painting is segmented into background and figure;
-  the face, chin, throat, neck and shoulders come straight from it, and the skull (hidden by the
-  fire in the painting) is an ellipse fitted to the face. That silhouette is inflated into 3D by
-  solving a Poisson equation inside it and taking the square root (a disc becomes a sphere, a band
-  a round tube, with no creases), then capped per region, meshed with marching cubes, smoothed and
-  decimated to ~46k triangles. Normals come from the volume itself.
-- **Rig**: chest → neck → head, at pivots measured on the painting. Skin weights blend across the
-  nape-to-throat line so a turn twists the whole neck. `avatar.setPose({ yaw, pitch, breath,
-  bobX, bobY })`.
-- **Skin**: near-black navy covered in short combed strokes in patches of different directions
-  (like the painting), a glossy ultramarine zone behind the neck with two hot streaks, a maroon
-  warmth at the cheek, an orange rim from the lava, blue light from his fire (sampled from the
-  simulation) with a yellow-to-cyan rim where it licks the forehead, and a cyan dissolve edge when
-  he teleports in. The strokes live in rest-pose space, so they stay on the skin as he moves.
+- **Shape** (`tools/avatar/`): a sculpted head, so he reads as a real head when he turns. A
+  stylised anatomical head is built from smooth signed-distance shapes (`sculpt.py`): one smooth
+  superquadric cranium, brow and cheekbones as soft bumps, nose, lips, jaw, ears, the muscles of
+  the neck, and a neck-to-shoulders loft whose side view follows the painted rows. Its side-view
+  outline is then pulled onto the painting's (the figure, plus the skull the painting hides under
+  the fire) by smooth 2D warps, the last ones acting only near the midline plane, so the rest pose
+  is the painting (face profile within ~1 px) and turned he has a forehead, eyes, cheekbones and a
+  jaw. Marching cubes, smoothing, decimation to ~56k triangles; normals from the field.
+  `tools/avatar/check.py` measures the result against the painting and renders it from all sides.
+- **Rig**: chest → neck → head, at pivots measured on the painting. The skull, face and jaw ride
+  the head bone as one (no lagging chin); the neck twists in the band below the jaw, and the
+  shoulders follow a little. `avatar.setPose({ yaw, pitch, roll, breath, bobX, bobY })`.
+- **Skin**: dark teal-navy covered in long combed brush strokes in patches of different
+  directions (the painting's face and neck), laid in the plane each part of the skin faces most,
+  so the face front has them too when he turns; a glossy ultramarine zone behind the neck with two
+  hot streaks, a maroon warmth at the cheek, an orange rim from the lava, blue light from his fire
+  (sampled from the simulation), and a cyan dissolve edge when he teleports in. The strokes live
+  in rest-pose space, so they stay on the skin as he moves.
+- **Life** (`src/signals.js`): breath, bob, idle sway, and every 5 to 10 s a glance: towards the
+  viewer (with a curious tilt), half way, up into his own fire, or away over his shoulder; while
+  he holds a look his head settles with small re-aims.
 
 ### The fire
 
 A 96×56×48 grid (`config.fireBox`) stored as a 2D texture atlas, stepped on the GPU every frame:
 advection, buoyancy, a wind that blows older flame back, a slow turbulence force, vorticity
 confinement, and a two-level pressure solve. The avatar's skull, face and neck are solid
-obstacles that move with the bones; the scalp (a shell around the skull, from the brow line to
-the nape) emits the fuel in noise-driven tongues. The volume is ray-marched at half resolution,
-stopped at the avatar's depth (fire in front of his face shows, fire behind his head does not),
-and composited over everything. The palette follows the painting: deep blue and ultramarine
-bodies, cyan and white cores, warm orange/pink fringes. Look and behaviour: `config.fireParams`
-(defaults and comments in `src/fire/fire.js`).
+obstacles that move with the bones; the scalp (a thin shell around the skull, from just under the
+eyes to the nape, as in the painting) emits the fuel in noise-driven tongues that rise and burn
+out at their tips. The volume is ray-marched at half resolution, stopped at the avatar's depth
+(fire in front of his face shows, fire behind his head does not), and composited over everything.
+
+The look follows the painting rather than a lit cloud: each ray gets one colour from the fuel it
+crossed, the fuel's age (which runs along each tongue) and its height, through palettes sampled
+from the painting (deep violet roots, the fully saturated electric violet-blue body, azure and
+cyan towards the top, a few pink and orange tongues), with an opacity curve that gives solid
+colour fields with short soft edges and an iridescent glowing rim where the fire meets the
+background. The drawn plume widens with height around the skull's axis (`fanBack`, `fanFront`), so
+the flames behind his head lean up and back and the ones over his face rise along the forehead.
+Look and behaviour: `config.fireParams` (defaults and comments in `src/fire/fire.js`).
 
 ### The sequence
 
@@ -123,7 +138,8 @@ through a noisy dissolve, and his fire ignites once he is mostly there.
 
 ```bash
 python -m pip install pillow numpy scipy scikit-image fast-simplification
-python tools/build_avatar.py     # src/avatar/bust.bin, bust.json, figure.webp
+python tools/avatar/build.py     # src/avatar/bust.bin, bust.json, figure.webp (~3 min)
+python tools/avatar/check.py     # silhouette, profile and weight checks + renders
 python tools/prepare.py          # src/tex/* (backdrop plates)
 ```
 
@@ -133,7 +149,7 @@ Both write visual checks to `tools/debug/` (ignored by git).
 
 - WebGL2 with half-float render targets (every evergreen browser).
 - `backdrop-filter` for the panel, with a solid fallback.
-- Measured on an Intel UHD integrated GPU at 1280×720: about 27 ms per frame (the fire's step
+- Measured on an Intel UHD integrated GPU at 1280×720: about 25 ms per frame (the fire's step
   ~6 ms of GPU time, its march and composite ~2–4 ms, the backdrop and avatar the rest), inside
   the 24 fps budget. The device pixel ratio is capped at 1.0 and the internal resolution steps
   down automatically (and back up) when frames miss the budget; `?firegrid=low` halves the

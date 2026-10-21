@@ -1,13 +1,14 @@
 // advect-velocity.frag.glsl — semi-Lagrangian (RK2) self-advection of the velocity, plus
 // every force: buoyancy, the wind that blows the plume back, damping, the scalp's push and
-// the pointer. Solid cells (inside an obstacle ellipsoid) take the obstacle's velocity and
+// the pointer. Solid cells (inside an obstacle ellipsoid) take the velocity of the obstacle's
+// rigid motion at that point (it turns, so the side of the skull sweeps the air with it) and
 // are flagged in .w, which every later pass reads.
 
 uniform sampler2D uVel;
 uniform sampler2D uScal;
 uniform float uDt;
 uniform mat4 uObs[6];        // world -> unit sphere of each obstacle
-uniform vec3 uObsVel[6];
+uniform mat4 uObsMotion[6];  // world position -> velocity of the obstacle point there
 uniform int uObsCount;
 uniform float uBuoyancy;
 uniform vec3 uWindDir;
@@ -16,7 +17,7 @@ uniform vec2 uWindAge;       // x share of the wind on fresh fuel, y age (s) at 
 uniform float uDamping;
 uniform vec4 uTurb;          // x strength (world units/s^2), y scale (noise cells per world unit), z drift, w flames-only share
 uniform vec4 uEmitVel;       // x speed, y outward, z up, w back (weights of the direction)
-uniform float uEmitVelRate;
+uniform vec3 uEmitVel2;      // x rate (1/s), y depth share of the outward push, z share of the scalp's own motion
 uniform float uIntensity;
 uniform vec4 uPointer;       // xy world position, zw world velocity
 uniform vec3 uPointerParams; // x radius, y strength, z rate (0 = inactive)
@@ -31,7 +32,13 @@ void main() {
   for (int i = 0; i < 6; i++) {
     if (i >= uObsCount) break;
     vec3 q = (uObs[i] * vec4(w, 1.0)).xyz;
-    if (dot(q, q) < 1.0) { fragColor = vec4(uObsVel[i], 1.0); return; }
+    if (dot(q, q) < 1.0) {
+      vec3 vo = (uObsMotion[i] * vec4(w, 1.0)).xyz;
+      float so = length(vo);
+      if (!(so < 3.0)) vo = so > 0.0 && so < 1e6 ? vo * (3.0 / so) : vec3(0.0);
+      fragColor = vec4(vo, 1.0);
+      return;
+    }
   }
 
   vec3 g = vec3(c) + 0.5;
@@ -64,10 +71,15 @@ void main() {
   float capPos;
   float e = emitter(w, n, tone, capPos) * uIntensity;
   if (e > 0.0) {
-    // combed: up and back along the scalp (tangential), plus a little outward lift
+    // combed: up and back along the scalp (tangential), plus a little outward lift. The outward
+    // part loses most of its depth (Z) component: on the side of the skull that faces the viewer
+    // the flames climb over the head instead of leaving it towards the camera.
     vec3 comb = vec3(-uEmitVel.w, uEmitVel.z, 0.0);
-    vec3 dir = normalize(n * uEmitVel.y + (comb - n * dot(comb, n)) + 1e-4 * n);
-    v = mix(v, dir * uEmitVel.x, e * (1.0 - exp(-uEmitVelRate * uDt)));
+    vec3 nOut = vec3(n.xy, n.z * uEmitVel2.y);
+    vec3 dir = normalize(nOut * uEmitVel.y + (comb - n * dot(comb, n)) + 1e-4 * n);
+    // relative to the scalp: when the head turns, the air it releases moves with it
+    vec3 target = dir * uEmitVel.x + scalpVelocity(w) * uEmitVel2.z;
+    v = mix(v, target, e * (1.0 - exp(-uEmitVel2.x * uDt)));
   }
 
   // Pointer: the cursor only moves the air. Push along its motion (never brake the flow),

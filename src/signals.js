@@ -1,10 +1,12 @@
 /**
  * Slow, fluid "life" signals for the character and the fox. Read them as plain
  * properties after update(dt, elapsed):
- *   turn        0..1   head glance towards the viewer, spring-smoothed (no hard ramps); each
- *                      glance picks a look: to the viewer, half way and down, or up into the fire
- *   headYaw     rad    glance + continuous idle sway
- *   headPitch   rad    nods: glance dip + idle sway
+ *   turn       -1..1   head glance towards the viewer (< 0: away), spring-smoothed (no hard
+ *                      ramps); each glance picks a look: to the viewer, half way and down, up into
+ *                      the fire, or away over his shoulder
+ *   headYaw     rad    glance + small settling moves while he holds a look + idle sway
+ *   headPitch   rad    nods: glance dip + settling + idle sway
+ *   headRoll    rad    a slight tilt that comes with each look, + idle sway
  *   glance      0..1   impulse at the moment a glance starts, decays exp(-2t)
  *   breath     -1..1   slow breathing, period 4.8 s
  *   bob         {x,y}  body drift in image-uv units
@@ -21,12 +23,17 @@ const WAIT_MIN = 5, WAIT_RANGE = 5;        // 5..10 s between glances
 const HOLD_MIN = 2.0, HOLD_RANGE = 2.0;    // 2..4 s looking at you
 
 // The looks he chooses from when he glances (weights sum to 1). turn: 0 profile .. 1 facing the
-// viewer as far as the rig allows; pitch: radians, > 0 lifts the chin.
+// viewer as far as the rig allows (< 0 turns away); pitch: radians, > 0 lifts the chin; roll:
+// radians, a slight tilt of the head that comes with the look.
 const LOOKS = [
-  { w: 0.45, turn: 1.0, pitch: 0.05 },    // towards the viewer
-  { w: 0.30, turn: 0.5, pitch: -0.04 },   // half way, eyes a little down
-  { w: 0.25, turn: 0.22, pitch: 0.14 },   // up, into his own fire
+  { w: 0.38, turn: 1.0, pitch: 0.04, roll: 0.05 },      // towards the viewer, a curious tilt
+  { w: 0.24, turn: 0.55, pitch: -0.05, roll: 0.02 },    // half way, eyes a little down
+  { w: 0.22, turn: 0.25, pitch: 0.15, roll: -0.03 },    // up, into his own fire
+  { w: 0.16, turn: -0.30, pitch: -0.06, roll: -0.03 },  // away, down over his shoulder
 ];
+const TURN_YAW = 0.88;                     // rad of head yaw at turn = 1 (before main.js scaling)
+// While he holds a look, his head settles: small re-aims every SETTLE_MIN..+RANGE s.
+const SETTLE_MIN = 0.7, SETTLE_RANGE = 1.1;
 
 const FOX_WAIT_MIN = 5, FOX_WAIT_RANGE = 8;
 const FOX_HOLD_MIN = 2, FOX_HOLD_RANGE = 3.5;
@@ -73,7 +80,15 @@ export function createSignals({ seed = 7 } = {}) {
   let sinceGlance = Infinity;
   const turnS = { x: 0, v: 0 };
   const lookPitchS = { x: 0, v: 0 };
+  const lookRollS = { x: 0, v: 0 };
   let look = LOOKS[0];
+  // settling: a small re-aim target (yaw, pitch) followed by a quicker spring
+  let settleT = 0;
+  let settleDue = SETTLE_MIN;
+  const settleYawS = { x: 0, v: 0 };
+  const settlePitchS = { x: 0, v: 0 };
+  let settleYaw = 0;
+  let settlePitch = 0;
   const pickLook = (r) => {
     let acc = 0;
     for (const l of LOOKS) { acc += l.w; if (r < acc) return l; }
@@ -88,7 +103,7 @@ export function createSignals({ seed = 7 } = {}) {
   let sniffDue = FOX_SNIFF_MIN + foxRand() * FOX_SNIFF_RANGE;
 
   const signals = {
-    turn: 0, headYaw: 0, headPitch: 0, glance: 0,
+    turn: 0, headYaw: 0, headPitch: 0, headRoll: 0, glance: 0,
     breath: 0, bob: { x: 0, y: 0 }, lightAngle: 0, flare: 0,
     foxAttention: 0, foxSniffTick: false,
     update,
@@ -106,16 +121,33 @@ export function createSignals({ seed = 7 } = {}) {
         sinceGlance = 0;
         look = pickLook(rand());
       }
+      settleT = 0;
+      settleYaw = 0;
+      settlePitch = 0;
     }
     signals.turn = springTo(turnS, glanceOn ? look.turn : 0, glanceOn ? 2.6 : 1.7, dt);
     const lookPitch = springTo(lookPitchS, glanceOn ? look.pitch : 0, glanceOn ? 2.2 : 1.6, dt);
+    const lookRoll = springTo(lookRollS, glanceOn ? look.roll : 0, glanceOn ? 2.0 : 1.5, dt);
     signals.glance = Math.exp(-sinceGlance * 2);
+
+    // ---- settling: once a look has landed, small quick re-aims (as if his gaze moves around you)
+    settleT += dt;
+    if (glanceOn && glanceT > 0.9 && settleT >= settleDue) {
+      settleT = 0;
+      settleDue = SETTLE_MIN + rand() * SETTLE_RANGE;
+      settleYaw = (rand() - 0.5) * 0.09 * Math.abs(look.turn);
+      settlePitch = (rand() - 0.5) * 0.05;
+    }
+    const settledYaw = springTo(settleYawS, glanceOn ? settleYaw : 0, 5.5, dt);
+    const settledPitch = springTo(settlePitchS, glanceOn ? settlePitch : 0, 5.0, dt);
 
     // ---- continuous sway so he is never frozen, layered under the glance
     const yawSway = 0.07 * sway(elapsed, 0.23, 0.41, 0.77);
     const pitchSway = 0.035 * sway(elapsed + 11.0, 0.19, 0.47, 0.83);
-    signals.headYaw = signals.turn * 0.62 + yawSway;
-    signals.headPitch = lookPitch + pitchSway;
+    const rollSway = 0.015 * sway(elapsed + 23.0, 0.17, 0.39, 0.71);
+    signals.headYaw = signals.turn * TURN_YAW + settledYaw + yawSway;
+    signals.headPitch = lookPitch + settledPitch + pitchSway;
+    signals.headRoll = lookRoll + rollSway;
 
     const s = Math.sin(TAU * elapsed / 4.8);
     signals.breath = s * Math.pow(Math.abs(s), 0.2);

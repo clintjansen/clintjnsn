@@ -3,15 +3,30 @@
 // tongues that get heat are the ones that get pushed.
 
 uniform mat4 uScalp;         // world -> cranium unit-sphere space
+uniform mat4 uScalpCap;      // the same for the cap (hairline) test: the head turned by only capFollow of its yaw
+uniform mat4 uScalpMotion;   // world position -> velocity of the scalp point there (rigid motion of the head)
 uniform vec3 uCapDir;        // cap axis, in that unit-sphere space
 uniform float uCapCos;       // cap half-angle (cosine)
 uniform float uShell;        // shell thickness, in unit-sphere units
+uniform float uShellFront;   // its share over the face (the front of the cranium): thin, so the flames rise along the forehead instead of bulging in front of it
 uniform float uEmitOn;       // 0 when the frame has no scalp
 uniform sampler2D uNoise;
 uniform float uTime;
 uniform vec4 uTongue;        // x scale (tongues across the cap), y drift speed, z lo, w hi
 uniform float uTongueFloor;  // emission between tongues (0 = fully separate licks)
 uniform vec4 uHairline;      // x noise pull-in of the cap edge (cosine units), y its scale, z edge softness (cosine units), w side share
+
+// Set by emitter(): the shell's weight without the tongues (cap * shell profile), 0 outside it.
+// The fuel and the air in it ride with the scalp when the head moves.
+float gShellW;
+
+// Velocity of the scalp point at world position w (world units / s), capped so a hitch in
+// the frame clock never throws the flames.
+vec3 scalpVelocity(vec3 w) {
+  vec3 v = (uScalpMotion * vec4(w, 1.0)).xyz;
+  float s = length(v);
+  return s > 3.0 ? v * (3.0 / s) : v;
+}
 
 // Weight 0..1 of the emitter at world position w. nWorld: outward scalp normal (world),
 // tone: a slow per-tongue value used as the hue phase of the fuel it releases,
@@ -20,12 +35,20 @@ float emitter(vec3 w, out vec3 nWorld, out float tone, out float capPos) {
   nWorld = vec3(0.0, 1.0, 0.0);
   tone = 0.5;
   capPos = 0.0;
+  gShellW = 0.0;
   if (uEmitOn < 0.5) return 0.0;
   vec3 q = (uScalp * vec4(w, 1.0)).xyz;
   float r = length(q);
   if (r <= 1.0 || r >= 1.0 + uShell) return 0.0;
   vec3 dir = q / r;
-  float c = dot(dir, uCapDir);
+  float shell = uShell * mix(1.0, uShellFront, smoothstep(0.1, 0.7, dir.x));
+  if (r >= 1.0 + shell) return 0.0;
+  // The cap is tested in a frame that follows only part of the head's yaw (uScalpCap): when he
+  // turns towards the viewer, the hairline on the side of the skull facing the camera slides
+  // forwards, so the crown seen from the front stays engulfed (and the far side, hidden behind
+  // the head, gives up as much).
+  vec3 dirC = normalize((uScalpCap * vec4(w, 1.0)).xyz);
+  float c = dot(dirC, uCapDir);
   if (c <= uCapCos) return 0.0;
   capPos = clamp((c - uCapCos) / (1.0 - uCapCos), 0.0, 1.0);
   nWorld = normalize(transpose(mat3(uScalp)) * dir);
@@ -40,18 +63,19 @@ float emitter(vec3 w, out vec3 nWorld, out float tone, out float capPos) {
   float n2 = textureLod(uNoise, (uv * 1.9 + vec2(-t * 1.3, t * 0.7) + 3.7) * 0.125, 0.0).g;
   float n = n1 * 0.7 + n2 * 0.3;
   // the noise sits around 0.5; stretch it so the tongues spread over the whole warm band
-  tone = clamp((textureLod(uNoise, (uv * 0.45 + vec2(t * 0.35, 1.3)) * 0.125, 0.0).b - 0.5) * 2.6 + 0.5, 0.0, 1.0);
+  tone = clamp((textureLod(uNoise, (uv * 1.1 + vec2(t * 0.35, 1.3)) * 0.125, 0.0).b - 0.5) * 2.6 + 0.5, 0.0, 1.0);
   float tongues = mix(uTongueFloor, 1.0, smoothstep(uTongue.z, uTongue.w, n));
 
   // An irregular, soft hairline. The cap boundary is a plane, which the side view shows as a
   // straight diagonal across the head; a slow noise around the cap pulls the edge inwards (it
   // never pushes it past the scalp the integrator defined) and the edge fades over uHairline.z.
-  float hn = textureLod(uNoise, (vec2(dot(dir, e1), dot(dir, e2)) * uHairline.y + vec2(11.3, 4.1)) * 0.125, 0.0).a;
+  float hn = textureLod(uNoise, (vec2(dot(dirC, e1), dot(dirC, e2)) * uHairline.y + vec2(11.3, 4.1)) * 0.125, 0.0).a;
   float cEdge = c - uHairline.x * clamp((hn - 0.5) * 2.5 + 0.5, 0.0, 1.0);
   float capW = smoothstep(uCapCos, uCapCos + uHairline.z, cEdge);
   // less on the sides of the skull (|dir.z|: towards / away from the viewer in head space), so
   // the flames gather along the crown and the back and frame the dark head
   capW *= 1.0 - uHairline.w * dir.z * dir.z;
-  float shellW = 1.0 - smoothstep(0.4, 1.0, (r - 1.0) / uShell);
-  return tongues * capW * shellW;
+  float shellW = 1.0 - smoothstep(0.4, 1.0, (r - 1.0) / shell);
+  gShellW = capW * shellW;
+  return tongues * gShellW;
 }

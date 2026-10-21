@@ -12,6 +12,7 @@ uniform float uHasDepth;
 uniform vec2 uDepthSize;
 uniform float uExposure;
 uniform float uShoulder;
+uniform float uSpill;         // how much energy above the knee bleeds into white (0 keeps saturated hues)
 uniform int uRaw;
 in vec2 vUv;
 layout(location = 0) out vec4 fragColor;
@@ -79,7 +80,7 @@ vec3 shoulder(vec3 x, float k) {
   vec3 y = min(x, vec3(k)) + (1.0 - k) * (1.0 - exp(-over / (1.0 - k)));
   // energy above the knee bleeds into the other channels: hot blue turns white, not flat
   float spill = max(max(over.r, over.g), over.b);
-  return y + (1.0 - y) * (1.0 - exp(-spill * 0.6));
+  return y + (1.0 - y) * (1.0 - exp(-spill * uSpill));
 }
 
 void main() {

@@ -18,9 +18,12 @@
   <canvas id="gl"></canvas>
   <pre id="hud"></pre>
   <!--
-    Fire lab: the fluid fire (src/fire/fire.js) on a provisional head.
+    Fire lab: the fluid fire (src/fire/fire.js) on the real avatar (src/avatar/), starting from
+    the page's config.fireParams.
     URL params: ?quality=low|high|ultra  &grid=96x56x48  &bg=ref|proc|black  &paused  &w=1230&h=641
-    Console: __fireLab.step(n), .render(), .capture(name), .setParam(k, v), .timings()
+                &pageparams=0 (the module's DEFAULT_PARAMS instead of config.fireParams)
+    Console: __fireLab.step(n), .stepTo(t), .render(), .capture(name), .shots(prefix),
+             .setParam(k, v), .setParams({...}), .pose(yaw, pitch), .timings()
   -->
   <script type="module" src="/src/fire/lab.js"></script>
 </body>
