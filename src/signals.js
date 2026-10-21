@@ -1,7 +1,8 @@
 /**
  * Slow, fluid "life" signals for the character and the fox. Read them as plain
  * properties after update(dt, elapsed):
- *   turn        0..1   head glance towards the viewer, spring-smoothed (no hard ramps)
+ *   turn        0..1   head glance towards the viewer, spring-smoothed (no hard ramps); each
+ *                      glance picks a look: to the viewer, half way and down, or up into the fire
  *   headYaw     rad    glance + continuous idle sway
  *   headPitch   rad    nods: glance dip + idle sway
  *   glance      0..1   impulse at the moment a glance starts, decays exp(-2t)
@@ -18,6 +19,14 @@ const TAU = Math.PI * 2;
 const FIRST_WAIT = 4.0;
 const WAIT_MIN = 5, WAIT_RANGE = 5;        // 5..10 s between glances
 const HOLD_MIN = 2.0, HOLD_RANGE = 2.0;    // 2..4 s looking at you
+
+// The looks he chooses from when he glances (weights sum to 1). turn: 0 profile .. 1 facing the
+// viewer as far as the rig allows; pitch: radians, > 0 lifts the chin.
+const LOOKS = [
+  { w: 0.45, turn: 1.0, pitch: 0.05 },    // towards the viewer
+  { w: 0.30, turn: 0.5, pitch: -0.04 },   // half way, eyes a little down
+  { w: 0.25, turn: 0.22, pitch: 0.14 },   // up, into his own fire
+];
 
 const FOX_WAIT_MIN = 5, FOX_WAIT_RANGE = 8;
 const FOX_HOLD_MIN = 2, FOX_HOLD_RANGE = 3.5;
@@ -63,6 +72,13 @@ export function createSignals({ seed = 7 } = {}) {
   let glanceDur = FIRST_WAIT;
   let sinceGlance = Infinity;
   const turnS = { x: 0, v: 0 };
+  const lookPitchS = { x: 0, v: 0 };
+  let look = LOOKS[0];
+  const pickLook = (r) => {
+    let acc = 0;
+    for (const l of LOOKS) { acc += l.w; if (r < acc) return l; }
+    return LOOKS[LOOKS.length - 1];
+  };
 
   // fox attention schedule (same shape) + idle sniff timer
   let foxOn = false;
@@ -86,16 +102,20 @@ export function createSignals({ seed = 7 } = {}) {
       glanceT -= glanceDur;
       glanceOn = !glanceOn;
       glanceDur = glanceOn ? HOLD_MIN + rand() * HOLD_RANGE : WAIT_MIN + rand() * WAIT_RANGE;
-      if (glanceOn) sinceGlance = 0;
+      if (glanceOn) {
+        sinceGlance = 0;
+        look = pickLook(rand());
+      }
     }
-    signals.turn = springTo(turnS, glanceOn ? 1 : 0, glanceOn ? 2.6 : 1.7, dt);
+    signals.turn = springTo(turnS, glanceOn ? look.turn : 0, glanceOn ? 2.6 : 1.7, dt);
+    const lookPitch = springTo(lookPitchS, glanceOn ? look.pitch : 0, glanceOn ? 2.2 : 1.6, dt);
     signals.glance = Math.exp(-sinceGlance * 2);
 
     // ---- continuous sway so he is never frozen, layered under the glance
     const yawSway = 0.07 * sway(elapsed, 0.23, 0.41, 0.77);
     const pitchSway = 0.035 * sway(elapsed + 11.0, 0.19, 0.47, 0.83);
     signals.headYaw = signals.turn * 0.62 + yawSway;
-    signals.headPitch = signals.turn * 0.05 + pitchSway;
+    signals.headPitch = lookPitch + pitchSway;
 
     const s = Math.sin(TAU * elapsed / 4.8);
     signals.breath = s * Math.pow(Math.abs(s), 0.2);
