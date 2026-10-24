@@ -1,25 +1,46 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="light">
-  <meta name="description" content="Clint Jansen. A smiling portrait made from Braille text characters.">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Clint Jansen. An interactive Braille portrait that turns toward you and smiles.">
   <meta name="theme-color" content="#d8371d">
-  <title>Clint Jansen</title>
+  <title>Clint Jansen — Smile lab</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-  <link rel="icon" href="./favicon-32.png" sizes="32x32" type="image/png">
-  <link rel="apple-touch-icon" href="./apple-touch-icon.png" sizes="180x180">
-  <link rel="preload" href="./assets/dejavu-braille.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="./assets/jetbrains-mono-latin-500.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./styles.css">
-  <link rel="stylesheet" href="./loader-motion.css?v=jnsn-ident-1">
-  <noscript><style>#loader.brand-loader { display: none; } .portrait { font-size: min(0.7vw, 1vh); }</style></noscript>
-  <script type="module" src="./landing.js?v=jnsn-ident-1"></script>
+  <link rel="stylesheet" href="./assets/smile-lab/controls-7AOHNIAK.css">
+  <link rel="stylesheet" href="./loader-motion.css">
+  <script type="module" src="./assets/smile-lab/smile-53UK3LBJ.js"></script>
+<noscript><style>#loader.brand-loader,.preview-toolbar,.motion-timeline,.footer-actions,#back-to-controls{display:none}.preview-main{height:calc(100dvh - 180px)}.art-frame{width:calc(100vw - 40px);height:100%}.preview-art{font-size:min(1vw,.95vh)}</style></noscript>
 </head>
 <body>
-  <main aria-label="Clint Jansen">
-    <pre class="portrait" role="img" aria-label="Front-facing portrait with a broad confident smile, made from Braille text characters">⠢⡑⢌⢢⢑⢌⠢⡑⢌⠢⡑⢌⠢⡑⢌⠢⡑⢌⢂⠪⡐⢌⢂⠪⡐⢌⢂⠪⡐⢌⢂⠢⠡⢂⢂⢊⠔⡐⠔⡐⠔⡨⢐⢐⠔⡐⠔⡐⡐⠔⡐⡐⠔⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⠔⡐⡐⡐⡐⠔⡐⡐⠔⡐⠔⡐⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔
+  <noscript><p style="text-align:center;font:12px monospace">Enable JavaScript to play the portrait and use the controls.</p></noscript>
+  <div class="preview-shell">
+    <header class="preview-header">
+      <jnsn-wordmark href="./" label="Clint Jansen smile lab"></jnsn-wordmark>
+      <div class="study-label">EXPRESSION STUDY <span>02 / TURN + SMILE</span></div>
+      <span class="local-label"><i></i> SMILE LAB</span>
+    </header>
+    <div class="preview-toolbar" aria-label="Preview controls">
+      <div class="expression-controls" role="group" aria-label="Expression">
+        <button type="button" data-expression="neutral" aria-pressed="true">Neutral</button>
+        <button type="button" data-expression="smile" aria-pressed="false">Big smile <span>↗</span></button>
+      </div>
+      <a class="add-image" href="./image-to-braille/"><span aria-hidden="true">+</span> Add image</a>
+      <label class="renderer-label">RENDER
+        <select id="renderer" aria-label="Rendering style">
+          <option value="braille">Image → Braille</option>
+          <option value="textmode">textmode.js · ASCII</option>
+          <option value="three">Three.js · AsciiEffect</option>
+          <option value="frames">Motion frames · Braille</option>
+        </select>
+      </label>
+      <button type="button" id="play" aria-pressed="false">Play turn + smile <span>▷</span></button>
+      <button type="button" id="page-preview">Preview page <span>↗</span></button>
+    </div>
+    <main class="preview-main" aria-label="Portrait study" aria-busy="true">
+      <div class="art-frame" id="art-frame">
+        <pre class="preview-art" id="braille-art" role="img" aria-label="Front-facing Braille portrait with a broad confident smile">⠢⡑⢌⢢⢑⢌⠢⡑⢌⠢⡑⢌⠢⡑⢌⠢⡑⢌⢂⠪⡐⢌⢂⠪⡐⢌⢂⠪⡐⢌⢂⠢⠡⢂⢂⢊⠔⡐⠔⡐⠔⡨⢐⢐⠔⡐⠔⡐⡐⠔⡐⡐⠔⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⡐⠔⡐⡐⡐⡐⠔⡐⡐⠔⡐⠔⡐⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔⡐⠔
 ⢅⢕⢑⠔⢅⢢⠱⡘⡐⠕⢌⠢⡑⢌⠢⡑⢌⠢⢡⠑⢌⠢⡑⢌⠢⢑⢐⠅⡊⢔⠐⠅⢅⠕⡐⡐⠔⡈⡂⡊⠔⡐⡁⡂⠢⡈⡂⠢⡈⡂⠢⠨⡐⡐⡐⣐⡐⡔⣴⢴⣢⣢⣂⣢⡢⡐⢄⢂⠂⡂⢂⠂⡂⡂⢂⢂⢂⢂⢂⢂⠢⢈⢂⢂⢂⠢⡈⡂⠢⡈⠢⡈⡂⡂⡊⠔⡈⠢⡈⡢⢈⢂⠊⢔⢈⢂⠊⠔⡈⡢⠨⢂⠊⠔⡈⠢⠨⢂⠊⠔
 ⠢⠪⡐⡅⢕⠔⡑⢌⠜⢌⠢⡑⡌⡢⡑⢌⠢⡑⢅⢊⠢⡑⢌⢂⢊⠢⠡⢊⢐⠅⠪⠨⡂⡂⠆⡊⠔⡨⢐⢈⢂⢂⢂⠊⢌⢐⢈⢂⠢⢨⢨⣢⣷⡷⣯⣯⣿⣿⣿⣿⣿⣿⣽⣿⣿⣿⣿⣿⣷⣔⣔⡌⠄⡂⠡⢐⢀⠢⢐⠐⠨⢐⠐⡐⡐⡐⡐⡈⠢⡈⡂⡂⡂⡢⢈⠢⠨⠨⡐⠠⡁⠢⢑⢐⢐⠡⠨⡨⠐⢄⢑⢐⠡⢑⠨⠨⡈⡂⠅⠅
 ⡑⠥⡑⢌⠢⡑⢌⠆⢕⢡⠱⠨⡂⢆⢊⠢⡑⢌⠢⡡⡑⢌⢂⠪⡐⠅⢕⠡⢂⠪⠨⢊⢐⢈⠢⡈⡂⡂⡂⡂⡂⡂⠢⢑⢐⢐⠰⣰⣽⣺⣿⣾⣷⣿⣿⣿⣿⣿⣿⣿⣷⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣮⣨⠠⠂⠌⠄⢊⠨⠐⡈⠄⡂⢂⠂⠌⡂⡂⡂⡂⡂⡂⠅⠌⢌⠢⢈⢂⠊⢌⢐⢐⠄⠅⢅⠂⠅⢅⢂⠢⠑⠄⢅⢑⢐⠨⠨⡈
@@ -87,7 +108,27 @@
 ⢅⢂⠪⡂⢕⢌⠕⢌⠢⡣⢢⢑⠱⠐⡀⢌⠢⡂⠕⠈⠌⠀⠄⠅⢌⠢⡑⢌⠢⡊⡢⡑⢌⠢⡑⡡⢑⠠⢁⠂⠁⠅⠂⠅⡢⢈⢂⠢⡑⢌⠢⠣⡑⢅⠕⡨⡘⠌⡆⢕⠡⡑⢌⠪⡈⡪⡘⣿⠎⠀⣠⢫⡺⣺⣪⠳⡑⠅⠣⡁⡊⠄⡅⠅⡌⠔⠨⡈⡂⡂⡂⡂⡊⠌⢌⠨⢈⢂⠂⡂⠅⢊⠐⠄⠅⠢⠨⢐⠈⠌⡨⠨⠨⠨⠨⠨⡐⡐⡐⠌
 ⢱⠠⠣⡘⡌⡆⠕⢅⢣⢊⠆⠕⡈⡐⡐⠔⡑⠀⡁⢈⠠⠨⢐⠡⡡⡑⢌⠢⡑⠔⠔⢌⠢⠡⢈⠂⠁⢀⠂⠄⡡⢈⢂⠅⡊⢄⠑⠌⠄⢕⠨⢊⠔⡁⡪⢐⢐⠅⡊⡢⢃⠎⢔⢱⠐⢌⠜⡘⠀⡰⢕⢇⡯⡗⡐⠔⡐⡡⢑⢐⠌⡂⠌⡂⡢⠡⢑⢐⠔⢐⢐⢐⠠⢑⢐⠨⢐⠠⡁⡂⠅⡂⠡⢁⠅⠅⠡⠂⠌⡂⡂⡑⠨⠨⢈⢂⢂⠢⠠⠡
 ⢸⠈⡎⢜⢌⠢⡑⢥⠱⡐⢅⠅⡂⢂⠂⡡⠐⠁⠐⡀⡂⠕⣐⠱⠰⡘⢌⠬⡘⢌⢊⢂⠅⠡⠠⠐⡈⠄⢌⢂⠢⢑⠄⢕⢈⢂⠅⢕⠡⠡⢊⠔⡐⢌⢐⠡⢂⠪⡐⢌⠢⢡⢑⠌⡪⡢⡑⠀⡐⡸⡱⣫⠣⡁⡂⢅⠐⢄⠅⡂⡂⠢⢑⢐⠠⡑⢐⢐⠌⡐⡐⡐⠨⢐⢐⠨⢐⠐⡐⠠⡁⡂⡑⡐⠠⠡⠡⠡⢁⠂⠔⠠⠡⡁⡂⡂⠢⠨⠨⠐</pre>
-  </main>
+        <div id="textmode-output" class="renderer-output" hidden role="img" aria-label="Portrait rendered with textmode.js"></div>
+        <div id="three-output" class="renderer-output" hidden role="img" aria-label="Portrait rendered with Three.js AsciiEffect"></div>
+      </div>
+      <div id="error" role="alert" hidden></div>
+      <button type="button" id="back-to-controls">← Back to preview controls</button>
+    </main>
+    <div class="motion-timeline">
+      <label for="motion-progress">NEUTRAL → FACING YOU</label>
+      <input type="range" id="motion-progress" min="0" max="1000" step="1" value="0" aria-label="Head turn and smile progress" aria-valuetext="Neutral image">
+      <output for="motion-progress" id="motion-percent">0%</output>
+    </div>
+    <footer class="preview-footer">
+      <div><strong id="caption">From a glance to a grin.</strong><span id="render-note">Selectable Braille text · ready to turn</span></div>
+      <div class="footer-actions">
+        <button type="button" id="download-art">Save text ↓</button>
+        <button type="button" id="export-motion">ASCII Motion JSON ↓</button>
+        <button type="button" id="replay-loader">Replay loader ↻</button>
+      </div>
+    </footer>
+    <p class="preview-disclaimer">AI-authored portrait keyframes. A study in character and expression.</p>
+  </div>
   <div id="loader" class="brand-loader" data-phase="preparing">
     <span class="sr-only" role="status" aria-live="polite" id="loader-status">Loading</span>
     <div class="loader__composition" aria-hidden="true" inert>

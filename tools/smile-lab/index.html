@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Clint Jansen — smile preview</title>
+  <link rel="icon" href="/site/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/site/styles.css">
+  <link rel="stylesheet" href="./preview.css">
+  <link rel="stylesheet" href="./loader-motion.css">
+  <script type="module" src="./preview.js"></script>
+</head>
+<body>
+  <div class="preview-shell">
+    <header class="preview-header">
+      <jnsn-wordmark href="/tools/smile-lab/" label="Clint Jansen smile preview"></jnsn-wordmark>
+      <div class="study-label">EXPRESSION STUDY <span>02 / TURN + SMILE</span></div>
+      <span class="local-label"><i></i> LOCAL PREVIEW</span>
+    </header>
+    <div class="preview-toolbar" aria-label="Preview controls">
+      <div class="expression-controls" role="group" aria-label="Expression">
+        <button type="button" data-expression="neutral" aria-pressed="true">Neutral</button>
+        <button type="button" data-expression="smile" aria-pressed="false">Big smile <span>↗</span></button>
+      </div>
+      <a class="add-image" href="../../src/braille/image-to-braille.html"><span aria-hidden="true">+</span> Add image</a>
+      <label class="renderer-label">RENDER
+        <select id="renderer" aria-label="Rendering style">
+          <option value="braille">Image → Braille</option>
+          <option value="textmode">textmode.js · ASCII</option>
+          <option value="three">Three.js · AsciiEffect</option>
+          <option value="frames">Motion frames · Braille</option>
+        </select>
+      </label>
+      <button type="button" id="play" aria-pressed="false">Play turn + smile <span>▷</span></button>
+      <button type="button" id="page-preview">Preview page <span>↗</span></button>
+    </div>
+    <main class="preview-main" aria-label="Portrait preview" aria-busy="true">
+      <div class="art-frame" id="art-frame">
+        <pre class="preview-art" id="braille-art" role="img" aria-label="Neutral portrait converted from an image into Braille characters"></pre>
+        <div id="textmode-output" class="renderer-output" hidden role="img" aria-label="Portrait rendered with textmode.js"></div>
+        <div id="three-output" class="renderer-output" hidden role="img" aria-label="Portrait rendered with Three.js AsciiEffect"></div>
+      </div>
+      <div id="error" role="alert" hidden></div>
+      <button type="button" id="back-to-controls">← Back to preview controls</button>
+    </main>
+    <div class="motion-timeline">
+      <label for="motion-progress">NEUTRAL → FACING YOU</label>
+      <input type="range" id="motion-progress" min="0" max="1000" step="1" value="0" aria-label="Head turn and smile progress" aria-valuetext="Neutral image">
+      <output for="motion-progress" id="motion-percent">0%</output>
+    </div>
+    <footer class="preview-footer">
+      <div><strong id="caption">From a glance to a grin.</strong><span id="render-note">Selectable Braille text · ready to turn</span></div>
+      <div class="footer-actions">
+        <button type="button" id="download-art">Save text ↓</button>
+        <button type="button" id="export-motion">ASCII Motion JSON ↓</button>
+        <button type="button" id="replay-loader">Replay loader ↻</button>
+      </div>
+    </footer>
+    <p class="preview-disclaimer">Local experiment only. AI-authored portrait keyframes, animated with a facial landmark mesh. Nothing here is published.</p>
+  </div>
+  <div id="loader" class="brand-loader" data-phase="preparing">
+    <span class="sr-only" role="status" aria-live="polite" id="loader-status">Loading</span>
+    <div class="loader__composition" aria-hidden="true" inert>
+      <div class="loader__masthead"><span>JNSN® &nbsp;/&nbsp; IN CHARACTER</span><span class="loader__edition">EXPRESSION STUDY &nbsp; 02—26</span></div>
+      <div class="loader__brand-window">
+        <div class="loader__brand">
+          <div class="loader__slice loader__slice--top"><jnsn-wordmark></jnsn-wordmark></div>
+          <div class="loader__slice loader__slice--middle"><jnsn-wordmark></jnsn-wordmark></div>
+          <div class="loader__slice loader__slice--bottom"><jnsn-wordmark></jnsn-wordmark></div>
+          <div class="loader__lockup"><jnsn-wordmark></jnsn-wordmark></div>
+          <div class="loader__shutter"></div>
+        </div>
+      </div>
+      <div class="loader__baseline"><span id="loader-phase">ASSEMBLING CHARACTER</span><span class="loader__phase-mark">[ J / N / S / N ]</span></div>
+      <div class="loader__bottom">
+        <div class="loader__statement">A LITTLE<br>MORE CHARACTER<span>NO ORDINARY INTRO.</span></div>
+        <div class="loader__box">
+          <div class="loader__label">LOADING <span>↗</span></div>
+          <div class="loader__num"><span class="loader__digits">0</span><span class="loader__pct">%</span></div>
+        </div>
+      </div>
+      <div class="loader__rule"><i></i></div>
+    </div>
+  </div>
+</body>
+</html>

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:site": "node tools/build-smile-site.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

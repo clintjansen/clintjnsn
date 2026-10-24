@@ -3,14 +3,25 @@
 ## Production website
 
 GitHub Pages publishes `site/` to https://clintjansen.com when `main` is pushed.
-This is the static smiling Braille portrait with the red JNSN® motion intro.
-The 120 × 68 character portrait is the smile lab's final “Big smile” pose,
-embedded as selectable text in `site/index.html`. Its loader
-uses `site/loader-motion.css` and `site/components/jnsn-wordmark.js`; the local
-smile lab shares these assets. `site/landing.js` waits for fonts (with a timeout),
-fits the portrait, runs the intro once and respects reduced motion. The portrait
-is also visible with JavaScript disabled. The experiment controls and converter
-are outside `site/` and are not deployed.
+The public smile lab runs the red JNSN® intro, then turns the Braille portrait
+toward the camera with a broad smile. Expression buttons, playback, timeline,
+four renderers, exports, full-page view and the browser-local image converter
+are included. Reduced motion disables autoplay. The static smiling portrait is
+embedded as a fallback for JavaScript being disabled or animation startup failing.
+
+The local lab in `tools/smile-lab/` is the source. Its loader and wordmark are
+shared with `site/`. Build the public page and its bundled dependencies with:
+
+```powershell
+npm ci
+npm ci --prefix tools/smile-lab --ignore-scripts
+npm run build:site
+```
+
+Commit the generated `site/` files together with source changes before pushing.
+`tools/build-smile-site.mjs` produces hashed bundles and the portrait atlas;
+Three.js and textmode.js load only when selected. It also publishes the standalone
+converter at `/image-to-braille/`. Uploaded images stay in the visitor's browser.
 
 Preview the production page at http://127.0.0.1:5192/site/ while Vite is running.
 The WebGL application described below remains a separate work in progress.

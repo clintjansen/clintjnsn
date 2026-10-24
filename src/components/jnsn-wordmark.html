@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JNSN® — Wordmark</title>
+  <style>
+    :root {
+      --jnsn-wordmark-size: clamp(58px, 20vw, 174px);
+      --jnsn-wordmark-color: #171715;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      background: #fff;
+    }
+
+    .wordmark {
+      display: inline-block;
+      font: 900 var(--jnsn-wordmark-size)/1 Arial, sans-serif;
+      color: var(--jnsn-wordmark-color);
+      text-decoration: none;
+      letter-spacing: -.0689655172em;
+      white-space: nowrap;
+    }
+
+    .wordmark span {
+      font-size: .3793103448em;
+      vertical-align: top;
+      letter-spacing: 0;
+      margin-left: .3636363636em;
+    }
+
+    .wordmark:focus-visible {
+      outline: 2px solid currentColor;
+      outline-offset: 5px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Set href to the destination page when reusing the logo. -->
+  <a class="wordmark" href="#" aria-label="JNSN">JNSN<span aria-hidden="true">®</span></a>
+</body>
+</html>

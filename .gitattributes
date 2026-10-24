@@ -1,0 +1,4 @@
+# Bundles retain upstream GLSL whitespace and are regenerated from source.
+site/assets/smile-lab/** linguist-generated=true -whitespace
+site/image-to-braille/index.html linguist-generated=true
+src/braille/image-to-braille.html linguist-generated=true
