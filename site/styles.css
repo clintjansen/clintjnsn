@@ -1,0 +1,145 @@
+@font-face {
+  font-family: 'JNSN Braille';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/dejavu-braille.woff2') format('woff2');
+  unicode-range: U+2800-28FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./assets/jetbrains-mono-latin-500.woff2') format('woff2');
+}
+:root {
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  --line: 2px;
+}
+* { box-sizing: border-box; }
+html { background: #fff; color: #000; }
+body { margin: 0; width: 100%; height: 100vh; height: 100dvh; overflow: hidden; }
+main { position: relative; width: 100%; height: 100%; }
+.portrait {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: 0;
+  width: max-content;
+  font-family: 'JNSN Braille', monospace;
+  font-size: 15px;
+  font-weight: 400;
+  font-style: normal;
+  font-synthesis: none;
+  font-variant-ligatures: none;
+  line-height: 1.15;
+  letter-spacing: 0;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  text-align: left;
+  direction: ltr;
+  user-select: text;
+  -webkit-user-select: text;
+  transform: translate(-50%, -50%) scale(var(--art-scale, 1));
+  transform-origin: center;
+}
+.portrait::selection { color: #fff; background: #111; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* ---------- loader: hard black and white on the red ---------- */
+
+#loader {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: none;
+  /* a straight cut, no easing */
+  transition: opacity 0.35s linear;
+}
+
+#loader.is-done {
+  opacity: 0;
+}
+
+#loader.is-hidden {
+  display: none;
+}
+
+.loader__box {
+  box-sizing: border-box;
+  min-width: 7ch;
+  padding: 10px 16px 12px;
+  border: 0;
+  background: #000;
+  color: #fff;
+  text-align: right;
+}
+
+.loader__label {
+  margin: 0 0 6px;
+  font: 500 clamp(9px, 1.1vw, 12px) / 1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
+  color: #fff;
+  opacity: 0.8;
+}
+
+.loader__num {
+  font: 800 clamp(44px, 7vw, 104px) / 1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.loader__digits {
+  /* reserve "100" so the box does not jitter as digits are added */
+  display: inline-block;
+  min-width: 3ch;
+  text-align: right;
+}
+
+.loader__pct {
+  font-size: 0.42em;
+  vertical-align: top;
+  margin-left: 0.12em;
+}
+
+/* the progress rule: a black track on the red, white fill driven by ui.js */
+.loader__rule {
+  width: 180px;
+  height: var(--line);
+  background: #000;
+}
+
+.loader__rule > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #fff;
+  transform-origin: left;
+  transition: width 0.12s linear;
+}
+
+
+/* The intro covers the white portrait until the red loader has finished. */
+#loader { background: #d8371d; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) {
+  #loader, .loader__rule > i { transition: none; }
+}
