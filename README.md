@@ -3,7 +3,9 @@
 ## Production website
 
 GitHub Pages publishes `site/` to https://clintjansen.com when `main` is pushed.
-This is the static Braille portrait with the red JNSN® motion intro. Its loader
+This is the static smiling Braille portrait with the red JNSN® motion intro.
+The 120 × 68 character portrait is the smile lab's final “Big smile” pose,
+embedded as selectable text in `site/index.html`. Its loader
 uses `site/loader-motion.css` and `site/components/jnsn-wordmark.js`; the local
 smile lab shares these assets. `site/landing.js` waits for fonts (with a timeout),
 fits the portrait, runs the intro once and respects reduced motion. The portrait
