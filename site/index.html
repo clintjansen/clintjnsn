@@ -13,8 +13,9 @@
   <link rel="preload" href="./assets/dejavu-braille.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="./assets/jetbrains-mono-latin-500.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./styles.css">
-  <noscript><style>#loader { display: none; } .portrait { font-size: min(0.7vw, 1vh); }</style></noscript>
-  <script src="./landing.js" defer></script>
+  <link rel="stylesheet" href="./loader-motion.css?v=jnsn-ident-1">
+  <noscript><style>#loader.brand-loader { display: none; } .portrait { font-size: min(0.7vw, 1vh); }</style></noscript>
+  <script type="module" src="./landing.js?v=jnsn-ident-1"></script>
 </head>
 <body>
   <main aria-label="Clint Jansen">
@@ -87,13 +88,29 @@
 ⠀⠀⠀⠀⠀⠀⢠⡉⣥⢻⣽⣷⢿⣷⣯⣿⣿⣿⣿⣿⣿⠂⠄⠡⠒⠐⠈⠳⢐⡚⡡⢜⡭⢻⡴⣛⢶⣭⡞⣧⣟⣯⢿⣭⣟⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣟⡛⢿⠙⣇⣿⢫⡝⣭⣓⣮⠷⣳⢾⣱⢟⣯⣟⣯⣷⣻⣾⡿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢿⣻⣷⣟⡷⣯⣿⣿
 ⠀⠀⣀⣄⣠⠌⢦⡱⣯⣿⣻⣾⡿⣯⣿⣿⣿⣿⣿⣿⡏⠙⠀⠀⠀⡰⣃⡤⢋⣜⣍⣫⣜⣣⣷⣻⣟⣶⡿⣟⣾⣽⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⡉⠁⡫⢜⠣⢯⣜⣦⠳⣬⠷⣽⣚⣷⣞⣳⣾⣷⣿⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢯⣿⣹⣿⣽⣯⣿</pre>
   </main>
-  <div id="loader">
+  <div id="loader" class="brand-loader" data-phase="preparing">
     <span class="sr-only" role="status" aria-live="polite" id="loader-status">Loading</span>
-    <div class="loader__box" aria-hidden="true">
-      <div class="loader__label">LOADING</div>
-      <div class="loader__num"><span class="loader__digits">0</span><span class="loader__pct">%</span></div>
+    <div class="loader__composition" aria-hidden="true" inert>
+      <div class="loader__masthead"><span>JNSN® &nbsp;/&nbsp; IN CHARACTER</span><span class="loader__edition">EXPRESSION STUDY &nbsp; 02—26</span></div>
+      <div class="loader__brand-window">
+        <div class="loader__brand">
+          <div class="loader__slice loader__slice--top"><jnsn-wordmark></jnsn-wordmark></div>
+          <div class="loader__slice loader__slice--middle"><jnsn-wordmark></jnsn-wordmark></div>
+          <div class="loader__slice loader__slice--bottom"><jnsn-wordmark></jnsn-wordmark></div>
+          <div class="loader__lockup"><jnsn-wordmark></jnsn-wordmark></div>
+          <div class="loader__shutter"></div>
+        </div>
+      </div>
+      <div class="loader__baseline"><span id="loader-phase">ASSEMBLING CHARACTER</span><span class="loader__phase-mark">[ J / N / S / N ]</span></div>
+      <div class="loader__bottom">
+        <div class="loader__statement">A LITTLE<br>MORE CHARACTER<span>NO ORDINARY INTRO.</span></div>
+        <div class="loader__box">
+          <div class="loader__label">LOADING <span>↗</span></div>
+          <div class="loader__num"><span class="loader__digits">0</span><span class="loader__pct">%</span></div>
+        </div>
+      </div>
+      <div class="loader__rule"><i></i></div>
     </div>
-    <div class="loader__rule" aria-hidden="true"><i></i></div>
   </div>
 </body>
 </html>

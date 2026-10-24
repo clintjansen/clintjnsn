@@ -1,3 +1,5 @@
+import './components/jnsn-wordmark.js';
+
 (() => {
   const art = document.querySelector('.portrait');
   const frame = art.parentElement;
@@ -5,13 +7,16 @@
   const digits = loader.querySelector('.loader__digits');
   const fill = loader.querySelector('.loader__rule > i');
   const status = document.getElementById('loader-status');
-  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const minimumDuration = reducedMotion ? 0 : 2800;
-  const start = performance.now();
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   let fontsReady = false;
   let shown = -1;
 
   frame.setAttribute('aria-busy', 'true');
+  frame.inert = true;
+  document.body.classList.add('loader-active');
+  loader.classList.add('is-running');
+  loader.dataset.phase = 'assembling';
+  const start = performance.now();
 
   function fitArtwork() {
     // offset dimensions ignore the current transform, so repeated resizing is stable.
@@ -38,19 +43,29 @@
     setProgress(1);
     fitArtwork();
     setTimeout(() => {
+      loader.dataset.phase = 'revealing';
       loader.classList.add('is-done');
       setTimeout(() => {
         loader.classList.add('is-hidden');
+        loader.classList.remove('is-running');
+        document.body.classList.remove('loader-active');
         status.textContent = 'Loaded';
         frame.setAttribute('aria-busy', 'false');
-      }, reducedMotion ? 0 : 360);
-    }, reducedMotion ? 0 : 250);
+        frame.inert = false;
+      }, reducedMotion.matches ? 0 : 840);
+    }, reducedMotion.matches ? 0 : 320);
   }
 
   function tick(now) {
-    const progress = minimumDuration ? Math.min(1, (now - start) / minimumDuration) : 1;
+    const elapsed = reducedMotion.matches ? 1 : Math.min(1, (now - start) / 3400);
+    const progress = 1 - Math.pow(1 - elapsed, 1.5);
     setProgress(fontsReady ? progress : Math.min(0.95, progress));
-    if (fontsReady && progress >= 1) reveal();
+    const phase = elapsed < .6 ? 'assembling' : elapsed < .91 ? 'locked' : 'ready';
+    if (loader.dataset.phase !== phase) {
+      loader.dataset.phase = phase;
+      document.getElementById('loader-phase').textContent = phase === 'locked' ? 'CHARACTER LOCKED IN' : 'MAKE AN IMPRESSION';
+    }
+    if (fontsReady && elapsed >= 1) reveal();
     else requestAnimationFrame(tick);
   }
 

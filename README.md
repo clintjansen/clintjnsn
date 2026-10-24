@@ -1,5 +1,18 @@
 # JNSN — WebGL landing page
 
+## Production website
+
+GitHub Pages publishes `site/` to https://clintjansen.com when `main` is pushed.
+This is the static Braille portrait with the red JNSN® motion intro. Its loader
+uses `site/loader-motion.css` and `site/components/jnsn-wordmark.js`; the local
+smile lab shares these assets. `site/landing.js` waits for fonts (with a timeout),
+fits the portrait, runs the intro once and respects reduced motion. The portrait
+is also visible with JavaScript disabled. The experiment controls and converter
+are outside `site/` and are not deployed.
+
+Preview the production page at http://127.0.0.1:5192/site/ while Vite is running.
+The WebGL application described below remains a separate work in progress.
+
 A single-page art piece in three layers, all seen through one orthographic camera:
 
 1. **The backdrop**: a full-screen fragment shader. The red lava with its flowing contour lines,
