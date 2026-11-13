@@ -182,3 +182,19 @@ Both write visual checks to `tools/debug/` (ignored by git).
   simulation cost.
 - Rendering pauses in background tabs. `prefers-reduced-motion` keeps the lava flowing at a crawl,
   rests the avatar, slows the fire and lowers the cadence to 12 fps.
+
+
+## Repository and workspace
+
+This folder is an independent Git repository inside the [JNSN workspace](../README.md).
+It is not a submodule. JNSN ignores this folder, so app changes are committed and pushed
+from here (`git status`, `git add <files>`, `git commit`, `git push`), independently of the
+root workspace. A JNSN commit does not include this app’s files.
+
+The local source folder was renamed from `jnsn-website/` to `website/`. This is the same repository, with its history, `main` branch and origin (`https://github.com/clintjansen/clintjnsn.git`) retained. The GitHub repository, package name and deployment configuration are unchanged. Run commands in `JNSN/website/`; Hub Services uses this folder for the website dev server.
+
+Open [JNSN.code-workspace](../JNSN.code-workspace) in VS Code to see this app and the other
+repositories as separate workspace folders and Source Control entries, like `hs-core`.
+Cloning JNSN alone does not download this repository: clone apps separately into the
+folder names documented in the workspace README. Keep temporary worktrees and recovery
+material under the workspace’s ignored `work/` directory.
